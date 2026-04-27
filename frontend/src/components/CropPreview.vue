@@ -3,10 +3,10 @@
     ref="containerRef"
     class="crop-preview"
     :class="{ 'crop-preview--active': mode !== 'idle' }"
-    @mousedown.prevent="onMouseDown"
-    @mousemove="onMouseMove"
-    @mouseup="onMouseUp"
-    @mouseleave="onMouseLeave"
+    @pointerdown.prevent="onPointerDown"
+    @pointermove="onPointerMove"
+    @pointerup="onPointerUp"
+    @pointercancel="onPointerUp"
   >
     <!-- Page image -->
     <img
@@ -40,7 +40,7 @@
           v-for="h in HANDLES"
           :key="h.name"
           :class="['crop-handle', `crop-handle--${h.name}`]"
-          @mousedown.stop.prevent="startResize(h.name, $event)"
+          @pointerdown.stop.prevent="startResize(h.name, $event)"
         />
       </div>
     </template>
@@ -113,7 +113,7 @@ function onImageError() {
 // ---------------------------------------------------------------------------
 // Mouse helpers
 // ---------------------------------------------------------------------------
-function getRelativePos(e: MouseEvent): { x: number; y: number } {
+function getRelativePos(e: PointerEvent): { x: number; y: number } {
   const rect = containerRef.value!.getBoundingClientRect();
   return {
     x: Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1),
@@ -126,10 +126,12 @@ function clamp(v: number, lo = 0, hi = 1) {
 }
 
 // ---------------------------------------------------------------------------
-// Mouse events
+// Pointer events  (pointer capture keeps drag alive outside the element)
 // ---------------------------------------------------------------------------
-function onMouseDown(e: MouseEvent) {
+function onPointerDown(e: PointerEvent) {
   if (!imageLoaded.value || imageError.value) return;
+  // Capture so pointermove/pointerup continue even when cursor leaves
+  containerRef.value?.setPointerCapture(e.pointerId);
   const pos = getRelativePos(e);
 
   // If clicking inside the existing crop rect → start moving
@@ -155,7 +157,7 @@ function onMouseDown(e: MouseEvent) {
   emit('update:cropBox', { x: pos.x, y: pos.y, w: 0, h: 0 });
 }
 
-function onMouseMove(e: MouseEvent) {
+function onPointerMove(e: PointerEvent) {
   if (mode.value === 'idle') return;
   const pos = getRelativePos(e);
 
@@ -223,16 +225,15 @@ function stopDrag() {
   dragStartBox.value = null;
 }
 
-function onMouseUp() {
+function onPointerUp(e: PointerEvent) {
+  containerRef.value?.releasePointerCapture(e.pointerId);
   stopDrag();
 }
 
-function onMouseLeave() {
-  stopDrag();
-}
-
-function startResize(handle: string, e: MouseEvent) {
+function startResize(handle: string, e: PointerEvent) {
   if (!props.cropBox) return;
+  // Redirect capture to the container so its pointermove/pointerup fire
+  containerRef.value?.setPointerCapture(e.pointerId);
   mode.value = 'resizing';
   activeHandle.value = handle;
   dragStart.value = getRelativePos(e);

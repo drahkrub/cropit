@@ -21,11 +21,12 @@
     </q-card>
 
     <!-- ─── Preview grid ──────────────────────────────────────────────── -->
-    <div class="row q-gutter-sm q-mb-md">
+    <div class="row no-wrap q-gutter-sm q-mb-md">
       <div
         v-for="(url, i) in urls"
         :key="i"
-        class="col-12 col-sm-6 col-lg-3"
+        class="col"
+        style="min-width: 0"
       >
         <CropPreview
           :imageUrl="url"
