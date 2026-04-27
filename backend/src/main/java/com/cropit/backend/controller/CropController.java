@@ -260,8 +260,8 @@ public class CropController {
             return ResponseEntity.notFound().build();
         }
 
-        // Prevent path-traversal attacks
-        if (filename.contains("..") || filename.contains("/") || filename.contains("\\")) {
+        // Prevent path-traversal attacks – only allow safe filename characters
+        if (!filename.matches("[a-zA-Z0-9._-]+")) {
             return ResponseEntity.badRequest().build();
         }
 

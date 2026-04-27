@@ -6,12 +6,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import jakarta.annotation.PreDestroy;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.FileImageInputStream;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -19,6 +21,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Executes pdftoppm and pdfinfo as external processes via {@link ProcessBuilder}.
@@ -38,6 +41,19 @@ public class PdfService {
         t.setDaemon(true);
         return t;
     });
+
+    @PreDestroy
+    public void shutdown() {
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
 
     // -------------------------------------------------------------------------
     // Public API
@@ -175,11 +191,13 @@ public class PdfService {
 
             runProcess(cmd, "pdftoppm render batch " + start + "-" + end);
 
-            // Register newly created output files
+            // Register newly created output files – collect all output PNGs atomically
             List<Path> newFiles = listPngsInDir(outputDir);
-            job.clearOutputFiles();
-            for (Path f : newFiles) {
-                job.addOutputFile(f.getFileName().toString());
+            synchronized (job) {
+                job.clearOutputFiles();
+                for (Path f : newFiles) {
+                    job.addOutputFile(f.getFileName().toString());
+                }
             }
 
             job.getDonePages().set(end);
@@ -212,7 +230,7 @@ public class PdfService {
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.redirectErrorStream(true);
         Process process = pb.start();
-        String output = new String(process.getInputStream().readAllBytes());
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         int exitCode = process.waitFor();
         if (exitCode != 0) {
             throw new IOException("Process [" + label + "] exited with code " + exitCode
@@ -232,7 +250,7 @@ public class PdfService {
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.redirectErrorStream(true);
         Process process = pb.start();
-        String output = new String(process.getInputStream().readAllBytes());
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         int exitCode = process.waitFor();
         if (exitCode != 0) {
             throw new IOException("Process [" + label + "] exited with code " + exitCode

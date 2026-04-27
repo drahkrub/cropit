@@ -272,6 +272,9 @@ const totalPages = ref(0);
 const outputFiles = ref<string[]>([]);
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+/** Stop polling after 30 minutes to avoid indefinite polling if backend crashes. */
+const MAX_POLL_COUNT = 1200;
+let pollCount = 0;
 
 const stateColor = computed(() => {
   if (jobState.value === 'DONE') return 'positive';
@@ -393,7 +396,8 @@ async function startRender() {
 // ---------------------------------------------------------------------------
 function startPolling() {
   if (pollTimer !== null) return;
-  pollTimer = setInterval(pollStatus, 1500);
+  pollCount = 0;
+  pollTimer = setInterval(() => { void pollStatus(); }, 1500);
 }
 
 function stopPolling() {
@@ -405,6 +409,15 @@ function stopPolling() {
 
 async function pollStatus() {
   if (!jobId.value) return;
+
+  pollCount++;
+  if (pollCount > MAX_POLL_COUNT) {
+    renderError.value = 'Polling timed out – the backend may be unavailable. Please check the server.';
+    rendering.value = false;
+    jobState.value = 'ERROR';
+    stopPolling();
+    return;
+  }
 
   try {
     const res = await fetch(`/api/jobs/${jobId.value}/status`);
