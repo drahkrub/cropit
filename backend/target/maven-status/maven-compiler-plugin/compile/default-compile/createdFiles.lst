@@ -1,0 +1,8 @@
+com/cropit/backend/config/WebConfig.class
+com/cropit/backend/model/CropJob.class
+com/cropit/backend/model/JobState.class
+com/cropit/backend/service/JobService.class
+com/cropit/backend/model/CropBoxRequest.class
+com/cropit/backend/controller/CropController.class
+com/cropit/backend/service/PdfService.class
+com/cropit/backend/CropitApplication.class

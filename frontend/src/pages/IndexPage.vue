@@ -1,163 +1,239 @@
 <template>
   <q-page class="q-pa-md">
-    <!-- ─── Preview count control ─────────────────────────────────────── -->
+
+    <!-- ─── Step 1: Upload PDF ──────────────────────────────────────────────── -->
     <q-card flat bordered class="q-mb-md">
       <q-card-section>
-        <div class="row items-center q-gutter-md">
-          <div class="text-subtitle1 col-auto">Number of Previews</div>
-          <q-input
-            v-model.number="previewCount"
-            type="number"
-            :min="MIN_PREVIEW"
-            :max="MAX_PREVIEW"
+        <div class="text-subtitle1 q-mb-sm">Step 1 – Upload PDF</div>
+        <div class="row q-gutter-sm items-end">
+          <q-file
+            v-model="selectedFile"
+            label="Select PDF file"
+            accept=".pdf"
             outlined
             dense
-            style="width: 80px"
-          />
-          <q-slider
-            v-model="previewCount"
-            :min="MIN_PREVIEW"
-            :max="MAX_PREVIEW"
-            :step="1"
-            label
-            class="col"
-          />
-        </div>
-      </q-card-section>
-    </q-card>
+            class="col-12 col-md-5"
+            :disable="uploading"
+          >
+            <template #prepend>
+              <q-icon name="picture_as_pdf" />
+            </template>
+          </q-file>
 
-    <!-- ─── URL Inputs ─────────────────────────────────────────────────── -->
-    <q-card flat bordered class="q-mb-md">
-      <q-card-section>
-        <div class="text-subtitle1 q-mb-sm">Page Image URLs</div>
-        <div class="row q-gutter-sm">
-          <q-input
-            v-for="(_, i) in urls"
-            :key="i"
-            v-model="urls[i]"
-            :label="`Page ${i + 1}`"
-            outlined
-            dense
-            clearable
-            class="col-12 col-md-6 col-lg-3"
-            :hint="imageSizes[i] ? `${imageSizes[i]!.w} × ${imageSizes[i]!.h} px` : 'Enter image URL'"
-          />
-        </div>
-      </q-card-section>
-    </q-card>
+          <div class="col-12 col-md-3">
+            <div class="text-caption text-grey-7 q-mb-xs">
+              Preview pages: {{ previewCount }}
+            </div>
+            <q-slider
+              v-model="previewCount"
+              :min="1"
+              :max="20"
+              :step="1"
+              label
+              color="primary"
+              :disable="uploading"
+            />
+          </div>
 
-    <!-- ─── Preview row (horizontally scrollable) ────────────────────── -->
-    <div class="preview-scroll-container q-mb-md">
-      <div class="preview-row">
-        <div
-          v-for="(url, i) in urls"
-          :key="i"
-          class="preview-item"
-        >
-          <CropPreview
-            :imageUrl="url"
-            :cropBox="cropBox"
-            :label="`Page ${i + 1}`"
-            @update:cropBox="onCropUpdate"
-            @imageSize="(w, h) => onImageSize(i, w, h)"
-          />
-        </div>
-      </div>
-    </div>
-
-    <!-- ─── Crop values ───────────────────────────────────────────────── -->
-    <q-card flat bordered>
-      <q-card-section>
-        <div class="row items-center q-mb-sm">
-          <div class="text-subtitle1 col">Crop Box Values</div>
           <q-btn
-            v-if="cropBox"
-            flat
-            dense
-            icon="clear"
-            label="Clear crop"
-            color="negative"
-            @click="clearCrop"
+            color="primary"
+            icon="upload"
+            label="Upload & Generate Previews"
+            :loading="uploading"
+            :disable="!selectedFile || uploading"
+            class="col-12 col-md-auto"
+            @click="uploadPdf"
           />
         </div>
 
-        <div v-if="cropBox" class="row q-gutter-md">
-          <!-- Normalised values -->
-          <q-card flat bordered class="col-12 col-md-5">
-            <q-card-section>
-              <div class="text-caption text-grey-7 q-mb-xs">Normalised (0…1)</div>
-              <div class="mono-grid">
-                <span>x</span><span>{{ fmt(cropBox.x) }}</span>
-                <span>y</span><span>{{ fmt(cropBox.y) }}</span>
-                <span>w</span><span>{{ fmt(cropBox.w) }}</span>
-                <span>h</span><span>{{ fmt(cropBox.h) }}</span>
-              </div>
-            </q-card-section>
-          </q-card>
-
-          <!-- Pixel values (uses size of first loaded image) -->
-          <q-card flat bordered class="col-12 col-md-5">
-            <q-card-section>
-              <div class="text-caption text-grey-7 q-mb-xs">
-                Pixels
-                <span v-if="refSize">
-                  ({{ refSize.w }} × {{ refSize.h }} px)
-                </span>
-                <span v-else class="text-grey-5">(load an image for pixel values)</span>
-              </div>
-              <template v-if="refSize">
-                <div class="mono-grid">
-                  <span>x</span><span>{{ px(cropBox.x, refSize.w) }}</span>
-                  <span>y</span><span>{{ px(cropBox.y, refSize.h) }}</span>
-                  <span>w</span><span>{{ px(cropBox.w, refSize.w) }}</span>
-                  <span>h</span><span>{{ px(cropBox.h, refSize.h) }}</span>
-                </div>
-              </template>
-              <div v-else class="text-grey-5 text-caption">—</div>
-            </q-card-section>
-          </q-card>
-
-          <!-- JSON output -->
-          <q-card flat bordered class="col-12">
-            <q-card-section>
-              <div class="text-caption text-grey-7 q-mb-xs">JSON</div>
-              <pre class="crop-json">{{ cropJson }}</pre>
-            </q-card-section>
-          </q-card>
-        </div>
-
-        <div v-else class="text-grey-5 text-body2">
-          Draw a crop rectangle on any preview image to get started.
+        <div v-if="uploadError" class="text-negative q-mt-sm">
+          {{ uploadError }}
         </div>
       </q-card-section>
     </q-card>
+
+    <!-- ─── Step 2: Preview grid ────────────────────────────────────────────── -->
+    <template v-if="urls.length > 0">
+      <q-card flat bordered class="q-mb-md">
+        <q-card-section>
+          <div class="text-subtitle1 q-mb-sm">
+            Step 2 – Define Crop Box
+            <span class="text-grey-6 text-body2 q-ml-sm">
+              (drag to draw, move, or resize the yellow rectangle across all previews)
+            </span>
+          </div>
+
+          <!-- Horizontal scroll container for variable number of previews -->
+          <div class="preview-scroll-wrapper">
+            <div class="preview-row">
+              <div
+                v-for="(url, i) in urls"
+                :key="i"
+                class="preview-col"
+              >
+                <CropPreview
+                  :imageUrl="url"
+                  :cropBox="cropBox"
+                  :label="`Page ${previewPageIndices[i] ?? i + 1}`"
+                  @update:cropBox="onCropUpdate"
+                  @imageSize="(w, h) => onImageSize(i, w, h)"
+                />
+              </div>
+            </div>
+          </div>
+        </q-card-section>
+      </q-card>
+
+      <!-- ─── Crop values ───────────────────────────────────────────────── -->
+      <q-card flat bordered class="q-mb-md">
+        <q-card-section>
+          <div class="row items-center q-mb-sm">
+            <div class="text-subtitle1 col">Crop Box Values</div>
+            <q-btn
+              v-if="cropBox"
+              flat
+              dense
+              icon="clear"
+              label="Clear crop"
+              color="negative"
+              @click="clearCrop"
+            />
+          </div>
+
+          <div v-if="cropBox" class="row q-gutter-md">
+            <!-- Normalised values -->
+            <q-card flat bordered class="col-12 col-md-5">
+              <q-card-section>
+                <div class="text-caption text-grey-7 q-mb-xs">Normalised (0&hellip;1)</div>
+                <div class="mono-grid">
+                  <span>x</span><span>{{ fmt(cropBox.x) }}</span>
+                  <span>y</span><span>{{ fmt(cropBox.y) }}</span>
+                  <span>w</span><span>{{ fmt(cropBox.w) }}</span>
+                  <span>h</span><span>{{ fmt(cropBox.h) }}</span>
+                </div>
+              </q-card-section>
+            </q-card>
+
+            <!-- Pixel values (uses size of first loaded image) -->
+            <q-card flat bordered class="col-12 col-md-5">
+              <q-card-section>
+                <div class="text-caption text-grey-7 q-mb-xs">
+                  Pixels
+                  <span v-if="refSize">
+                    ({{ refSize.w }} &times; {{ refSize.h }} px)
+                  </span>
+                  <span v-else class="text-grey-5">(load an image for pixel values)</span>
+                </div>
+                <template v-if="refSize">
+                  <div class="mono-grid">
+                    <span>x</span><span>{{ px(cropBox.x, refSize.w) }}</span>
+                    <span>y</span><span>{{ px(cropBox.y, refSize.h) }}</span>
+                    <span>w</span><span>{{ px(cropBox.w, refSize.w) }}</span>
+                    <span>h</span><span>{{ px(cropBox.h, refSize.h) }}</span>
+                  </div>
+                </template>
+                <div v-else class="text-grey-5 text-caption">&mdash;</div>
+              </q-card-section>
+            </q-card>
+          </div>
+
+          <div v-else class="text-grey-5 text-body2">
+            Draw a crop rectangle on any preview image to get started.
+          </div>
+        </q-card-section>
+      </q-card>
+
+      <!-- ─── Step 3: Render ──────────────────────────────────────────────── -->
+      <q-card flat bordered class="q-mb-md">
+        <q-card-section>
+          <div class="text-subtitle1 q-mb-sm">Step 3 – Render All Pages</div>
+
+          <q-btn
+            color="secondary"
+            icon="auto_fix_high"
+            label="Render All Pages with Crop Box"
+            :disable="!cropBox || rendering || jobState === 'DONE'"
+            :loading="rendering"
+            @click="startRender"
+          />
+          <span v-if="!cropBox" class="q-ml-sm text-grey-6 text-caption">
+            (define a crop box first)
+          </span>
+          <span v-if="renderError" class="q-ml-sm text-negative text-caption">
+            {{ renderError }}
+          </span>
+
+          <!-- Progress -->
+          <template v-if="rendering || jobState === 'DONE' || jobState === 'ERROR'">
+            <div class="q-mt-md">
+              <div class="row items-center q-gutter-sm q-mb-xs">
+                <span class="text-caption">
+                  Pages rendered: {{ donePages }} / {{ totalPages }}
+                </span>
+                <q-badge
+                  :color="stateColor"
+                  :label="jobState"
+                />
+              </div>
+              <q-linear-progress
+                :value="totalPages > 0 ? donePages / totalPages : 0"
+                :color="stateColor"
+                rounded
+                class="q-mt-xs"
+                style="height: 10px"
+              />
+            </div>
+
+            <div v-if="jobState === 'DONE'" class="q-mt-md">
+              <div class="text-positive q-mb-sm">
+                <q-icon name="check_circle" class="q-mr-xs" />
+                Rendering complete &ndash; {{ outputFiles.length }} PNG(s) generated.
+              </div>
+              <div class="text-caption text-grey-6 q-mb-xs">
+                Output files (served by the backend):
+              </div>
+              <ul class="output-file-list">
+                <li v-for="url in outputFiles" :key="url">
+                  <a :href="url" target="_blank">{{ url.split('/').pop() }}</a>
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="jobState === 'ERROR'" class="q-mt-sm text-negative">
+              <q-icon name="error" class="q-mr-xs" />
+              {{ renderError || 'An unknown error occurred.' }}
+            </div>
+          </template>
+        </q-card-section>
+      </q-card>
+    </template>
+
   </q-page>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, onUnmounted } from 'vue';
 import type { CropBox } from 'components/models';
 import CropPreview from 'components/CropPreview.vue';
 
 // ---------------------------------------------------------------------------
-// Preview count
+// Upload state
 // ---------------------------------------------------------------------------
-const MIN_PREVIEW = 1;
-const MAX_PREVIEW = 20;
-const DEFAULT_COUNT = 4;
-
-function defaultUrl(index: number): string {
-  return `https://picsum.photos/seed/p${index + 1}/800/1131`;
-}
-
-const previewCount = ref(DEFAULT_COUNT);
+const selectedFile = ref<File | null>(null);
+const previewCount = ref<number>(4);
+const uploading = ref(false);
+const uploadError = ref<string | null>(null);
 
 // ---------------------------------------------------------------------------
-// URLs – pre-filled with placeholder Picsum images for easy demo
+// Job state
 // ---------------------------------------------------------------------------
-const urls = ref<string[]>(
-  Array.from({ length: DEFAULT_COUNT }, (_, i) => defaultUrl(i)),
-);
+const jobId = ref<string | null>(null);
+
+// ---------------------------------------------------------------------------
+// Preview URLs and page mapping
+// ---------------------------------------------------------------------------
+const urls = ref<string[]>([]);
+const previewPageIndices = ref<number[]>([]);
 
 // ---------------------------------------------------------------------------
 // Crop state
@@ -173,10 +249,10 @@ function clearCrop() {
 }
 
 // ---------------------------------------------------------------------------
-// Image sizes (indexed by page position)
+// Image sizes (indexed by preview position)
 // ---------------------------------------------------------------------------
 interface Size { w: number; h: number }
-const imageSizes = ref<(Size | null)[]>(Array(DEFAULT_COUNT).fill(null));
+const imageSizes = ref<(Size | null)[]>([]);
 
 function onImageSize(index: number, w: number, h: number) {
   imageSizes.value[index] = { w, h };
@@ -186,28 +262,183 @@ function onImageSize(index: number, w: number, h: number) {
 const refSize = computed(() => imageSizes.value.find(Boolean) ?? null);
 
 // ---------------------------------------------------------------------------
-// Keep urls / imageSizes in sync with previewCount
+// Render state
 // ---------------------------------------------------------------------------
-watch(previewCount, (rawCount) => {
-  const count = Math.min(Math.max(rawCount, MIN_PREVIEW), MAX_PREVIEW);
-  // Clamp previewCount itself if the user typed an out-of-range value
-  if (count !== rawCount) {
-    previewCount.value = count;
-    return; // watch will re-fire with the clamped value
-  }
-  const cur = urls.value.length;
-  if (count === cur) return;
+const rendering = ref(false);
+const renderError = ref<string | null>(null);
+const jobState = ref<string>('');
+const donePages = ref(0);
+const totalPages = ref(0);
+const outputFiles = ref<string[]>([]);
 
-  if (count > cur) {
-    for (let i = cur; i < count; i++) {
-      urls.value.push(defaultUrl(i));
-      imageSizes.value.push(null);
-    }
-  } else {
-    urls.value = urls.value.slice(0, count);
-    imageSizes.value = imageSizes.value.slice(0, count);
-  }
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+const stateColor = computed(() => {
+  if (jobState.value === 'DONE') return 'positive';
+  if (jobState.value === 'ERROR') return 'negative';
+  return 'primary';
 });
+
+// ---------------------------------------------------------------------------
+// Upload & preview generation
+// ---------------------------------------------------------------------------
+async function uploadPdf() {
+  if (!selectedFile.value) return;
+
+  uploading.value = true;
+  uploadError.value = null;
+  urls.value = [];
+  previewPageIndices.value = [];
+  imageSizes.value = [];
+  cropBox.value = null;
+  jobId.value = null;
+  jobState.value = '';
+  donePages.value = 0;
+  totalPages.value = 0;
+  outputFiles.value = [];
+  renderError.value = null;
+  stopPolling();
+
+  const formData = new FormData();
+  formData.append('file', selectedFile.value);
+  formData.append('previewCount', String(previewCount.value));
+
+  try {
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const data = await res.json() as {
+      jobId?: string;
+      previews?: { url: string; filename: string }[];
+      imageWidth?: number;
+      imageHeight?: number;
+      totalPages?: number;
+      error?: string;
+    };
+
+    if (!res.ok) {
+      uploadError.value = data.error ?? `Upload failed (HTTP ${res.status})`;
+      return;
+    }
+
+    jobId.value = data.jobId ?? null;
+    totalPages.value = data.totalPages ?? 0;
+    imageSizes.value = [];
+
+    const previewUrls: string[] = [];
+    const pageIdxs: number[] = [];
+    const previews = data.previews ?? [];
+    previews.forEach((p, i) => {
+      previewUrls.push(p.url);
+      pageIdxs.push(i + 1);
+      imageSizes.value.push(null);
+    });
+    urls.value = previewUrls;
+    previewPageIndices.value = pageIdxs;
+
+  } catch (err) {
+    uploadError.value = err instanceof Error ? err.message : 'Unknown error during upload';
+  } finally {
+    uploading.value = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Start render
+// ---------------------------------------------------------------------------
+async function startRender() {
+  if (!jobId.value || !cropBox.value) return;
+
+  rendering.value = true;
+  renderError.value = null;
+  jobState.value = 'RENDERING';
+  donePages.value = 0;
+  outputFiles.value = [];
+
+  try {
+    const res = await fetch(`/api/jobs/${jobId.value}/render`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        x: cropBox.value.x,
+        y: cropBox.value.y,
+        w: cropBox.value.w,
+        h: cropBox.value.h,
+      }),
+    });
+
+    const data = await res.json() as { message?: string; error?: string };
+
+    if (!res.ok) {
+      renderError.value = data.error ?? `Render start failed (HTTP ${res.status})`;
+      rendering.value = false;
+      jobState.value = 'ERROR';
+      return;
+    }
+
+    // Start polling for progress
+    startPolling();
+
+  } catch (err) {
+    renderError.value = err instanceof Error ? err.message : 'Unknown error starting render';
+    rendering.value = false;
+    jobState.value = 'ERROR';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Progress polling
+// ---------------------------------------------------------------------------
+function startPolling() {
+  if (pollTimer !== null) return;
+  pollTimer = setInterval(pollStatus, 1500);
+}
+
+function stopPolling() {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+async function pollStatus() {
+  if (!jobId.value) return;
+
+  try {
+    const res = await fetch(`/api/jobs/${jobId.value}/status`);
+    if (!res.ok) return;
+
+    const data = await res.json() as {
+      state: string;
+      donePages: number;
+      totalPages: number;
+      outputFiles: string[];
+      errorMessage?: string | null;
+    };
+
+    jobState.value = data.state;
+    donePages.value = data.donePages;
+    totalPages.value = data.totalPages;
+    outputFiles.value = data.outputFiles ?? [];
+
+    if (data.state === 'DONE') {
+      rendering.value = false;
+      stopPolling();
+    } else if (data.state === 'ERROR') {
+      renderError.value = data.errorMessage ?? 'Render failed';
+      rendering.value = false;
+      stopPolling();
+    }
+
+  } catch {
+    // Silently ignore transient network errors during polling
+  }
+}
+
+// Stop polling when component is destroyed
+onUnmounted(stopPolling);
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -219,31 +450,27 @@ function fmt(v: number) {
 function px(norm: number, size: number) {
   return `${Math.round(norm * size)} px`;
 }
-
-const cropJson = computed(() => {
-  if (!cropBox.value) return '';
-  return JSON.stringify(cropBox.value, null, 2);
-});
 </script>
 
 <style scoped lang="scss">
-.preview-scroll-container {
+/* Horizontal scrolling container for preview images */
+.preview-scroll-wrapper {
   overflow-x: auto;
-  width: 100%;
+  overflow-y: visible;
 }
 
 .preview-row {
   display: flex;
   flex-wrap: nowrap;
   gap: 8px;
-  // Ensure the row is at least as wide as its contents so scrolling works
-  width: max-content;
-  min-width: 100%;
+  /* Ensure the row is at least as wide as needed so images are side-by-side */
+  min-width: min-content;
 }
 
-.preview-item {
-  flex: 0 0 220px;
-  width: 220px;
+.preview-col {
+  /* Each preview takes a fixed minimum width; images are never squashed below this */
+  flex: 0 0 280px;
+  max-width: 400px;
 }
 
 .mono-grid {
@@ -254,18 +481,13 @@ const cropJson = computed(() => {
   font-size: 13px;
 }
 
-.crop-json {
-  margin: 0;
+.output-file-list {
+  list-style: disc;
+  padding-left: 1.2rem;
+  margin: 4px 0;
+  font-size: 13px;
   font-family: monospace;
-  font-size: 12px;
-  background: #f5f5f5;
-  padding: 8px 12px;
-  border-radius: 4px;
-  overflow-x: auto;
-}
-
-body.body--dark .crop-json {
-  background: #2a2a2a;
+  max-height: 200px;
+  overflow-y: auto;
 }
 </style>
-
