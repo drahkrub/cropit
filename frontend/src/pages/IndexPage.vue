@@ -1,5 +1,31 @@
 <template>
   <q-page class="q-pa-md">
+    <!-- ─── Preview count control ─────────────────────────────────────── -->
+    <q-card flat bordered class="q-mb-md">
+      <q-card-section>
+        <div class="row items-center q-gutter-md">
+          <div class="text-subtitle1 col-auto">Number of Previews</div>
+          <q-input
+            v-model.number="previewCount"
+            type="number"
+            :min="MIN_PREVIEW"
+            :max="MAX_PREVIEW"
+            outlined
+            dense
+            style="width: 80px"
+          />
+          <q-slider
+            v-model="previewCount"
+            :min="MIN_PREVIEW"
+            :max="MAX_PREVIEW"
+            :step="1"
+            label
+            class="col"
+          />
+        </div>
+      </q-card-section>
+    </q-card>
+
     <!-- ─── URL Inputs ─────────────────────────────────────────────────── -->
     <q-card flat bordered class="q-mb-md">
       <q-card-section>
@@ -20,20 +46,22 @@
       </q-card-section>
     </q-card>
 
-    <!-- ─── Preview grid ──────────────────────────────────────────────── -->
-    <div class="row no-wrap q-gutter-sm q-mb-md">
-      <div
-        v-for="(url, i) in urls"
-        :key="i"
-        class="col preview-col"
-      >
-        <CropPreview
-          :imageUrl="url"
-          :cropBox="cropBox"
-          :label="`Page ${i + 1}`"
-          @update:cropBox="onCropUpdate"
-          @imageSize="(w, h) => onImageSize(i, w, h)"
-        />
+    <!-- ─── Preview row (horizontally scrollable) ────────────────────── -->
+    <div class="preview-scroll-container q-mb-md">
+      <div class="preview-row">
+        <div
+          v-for="(url, i) in urls"
+          :key="i"
+          class="preview-item"
+        >
+          <CropPreview
+            :imageUrl="url"
+            :cropBox="cropBox"
+            :label="`Page ${i + 1}`"
+            @update:cropBox="onCropUpdate"
+            @imageSize="(w, h) => onImageSize(i, w, h)"
+          />
+        </div>
       </div>
     </div>
 
@@ -107,19 +135,29 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import type { CropBox } from 'components/models';
 import CropPreview from 'components/CropPreview.vue';
 
 // ---------------------------------------------------------------------------
+// Preview count
+// ---------------------------------------------------------------------------
+const MIN_PREVIEW = 1;
+const MAX_PREVIEW = 20;
+const DEFAULT_COUNT = 4;
+
+function defaultUrl(index: number): string {
+  return `https://picsum.photos/seed/p${index + 1}/800/1131`;
+}
+
+const previewCount = ref(DEFAULT_COUNT);
+
+// ---------------------------------------------------------------------------
 // URLs – pre-filled with placeholder Picsum images for easy demo
 // ---------------------------------------------------------------------------
-const urls = ref<string[]>([
-  'https://picsum.photos/seed/p1/800/1131',
-  'https://picsum.photos/seed/p2/800/1131',
-  'https://picsum.photos/seed/p3/800/1131',
-  'https://picsum.photos/seed/p4/800/1131',
-]);
+const urls = ref<string[]>(
+  Array.from({ length: DEFAULT_COUNT }, (_, i) => defaultUrl(i)),
+);
 
 // ---------------------------------------------------------------------------
 // Crop state
@@ -138,7 +176,7 @@ function clearCrop() {
 // Image sizes (indexed by page position)
 // ---------------------------------------------------------------------------
 interface Size { w: number; h: number }
-const imageSizes = ref<(Size | null)[]>([null, null, null, null]);
+const imageSizes = ref<(Size | null)[]>(Array(DEFAULT_COUNT).fill(null));
 
 function onImageSize(index: number, w: number, h: number) {
   imageSizes.value[index] = { w, h };
@@ -146,6 +184,30 @@ function onImageSize(index: number, w: number, h: number) {
 
 /** Use the first available image size as the reference for pixel conversion */
 const refSize = computed(() => imageSizes.value.find(Boolean) ?? null);
+
+// ---------------------------------------------------------------------------
+// Keep urls / imageSizes in sync with previewCount
+// ---------------------------------------------------------------------------
+watch(previewCount, (rawCount) => {
+  const count = Math.min(Math.max(rawCount, MIN_PREVIEW), MAX_PREVIEW);
+  // Clamp previewCount itself if the user typed an out-of-range value
+  if (count !== rawCount) {
+    previewCount.value = count;
+    return; // watch will re-fire with the clamped value
+  }
+  const cur = urls.value.length;
+  if (count === cur) return;
+
+  if (count > cur) {
+    for (let i = cur; i < count; i++) {
+      urls.value.push(defaultUrl(i));
+      imageSizes.value.push(null);
+    }
+  } else {
+    urls.value = urls.value.slice(0, count);
+    imageSizes.value = imageSizes.value.slice(0, count);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -165,8 +227,23 @@ const cropJson = computed(() => {
 </script>
 
 <style scoped lang="scss">
-.preview-col {
-  min-width: 0; // allow flex items to shrink below content size
+.preview-scroll-container {
+  overflow-x: auto;
+  width: 100%;
+}
+
+.preview-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  // Ensure the row is at least as wide as its contents so scrolling works
+  width: max-content;
+  min-width: 100%;
+}
+
+.preview-item {
+  flex: 0 0 220px;
+  width: 220px;
 }
 
 .mono-grid {
