@@ -21,11 +21,11 @@
     </q-card>
 
     <!-- ─── Preview grid ──────────────────────────────────────────────── -->
-    <div class="row q-gutter-sm q-mb-md">
+    <div class="row no-wrap q-gutter-sm q-mb-md">
       <div
         v-for="(url, i) in urls"
         :key="i"
-        class="col-12 col-sm-6 col-lg-3"
+        class="col preview-col"
       >
         <CropPreview
           :imageUrl="url"
@@ -165,6 +165,10 @@ const cropJson = computed(() => {
 </script>
 
 <style scoped lang="scss">
+.preview-col {
+  min-width: 0; // allow flex items to shrink below content size
+}
+
 .mono-grid {
   display: grid;
   grid-template-columns: 1.5rem 1fr;
