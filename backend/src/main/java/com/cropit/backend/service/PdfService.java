@@ -71,12 +71,8 @@ public class PdfService {
         Path previewDir = job.getJobDir().resolve("preview");
         int count = job.getPreviewCount();
 
-        // Determine total page count first so we can pick a sensible subset
-        int totalPages = getPdfPageCount(pdfPath);
-        job.setTotalPages(totalPages);
-
-        int lastPreviewPage = Math.min(count, totalPages);
-
+        // Pass -l count directly; pdftoppm stops at the actual last page even when
+        // count exceeds the page count, so no upfront pdfinfo call is needed.
         String outputPrefix = previewDir.resolve("page").toString();
 
         List<String> cmd = new ArrayList<>(List.of(
@@ -85,7 +81,7 @@ public class PdfService {
                 "-r", "200",
                 "-scale-to", "1540",
                 "-f", "1",
-                "-l", String.valueOf(lastPreviewPage),
+                "-l", String.valueOf(count),
                 pdfPath.toString(),
                 outputPrefix
         ));
@@ -96,6 +92,15 @@ public class PdfService {
         List<Path> files = listPngsInDir(previewDir);
         if (files.isEmpty()) {
             throw new IOException("pdftoppm produced no output files for preview generation");
+        }
+
+        // If pdftoppm produced fewer files than requested, the PDF has exactly that
+        // many pages and no further call is needed.  When all requested previews were
+        // produced the total page count may be higher, so we fall back to pdfinfo.
+        if (files.size() < count) {
+            job.setTotalPages(files.size());
+        } else {
+            job.setTotalPages(getPdfPageCount(pdfPath));
         }
 
         // Read natural dimensions from the first PNG

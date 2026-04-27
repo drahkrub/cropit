@@ -24,7 +24,7 @@ public class CropJob {
     /** Number of preview images requested (1–20). */
     private int previewCount;
 
-    /** Total pages in the PDF as reported by pdfinfo. */
+    /** Total pages in the PDF. Set during preview generation (from file count or pdfinfo). */
     private volatile int totalPages;
 
     /** Pixel dimensions of the first preview image (set after preview generation). */
