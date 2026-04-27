@@ -4,9 +4,6 @@
     class="crop-preview"
     :class="{ 'crop-preview--active': mode !== 'idle' }"
     @mousedown.prevent="onMouseDown"
-    @mousemove="onMouseMove"
-    @mouseup="onMouseUp"
-    @mouseleave="onMouseLeave"
   >
     <!-- Page image -->
     <img
@@ -51,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onUnmounted } from 'vue';
 import type { CropBox } from 'components/models';
 
 // ---------------------------------------------------------------------------
@@ -128,6 +125,18 @@ function clamp(v: number, lo = 0, hi = 1) {
 // ---------------------------------------------------------------------------
 // Mouse events
 // ---------------------------------------------------------------------------
+function addDocumentListeners() {
+  document.addEventListener('mousemove', onMouseMove);
+  document.addEventListener('mouseup', onMouseUp);
+}
+
+function removeDocumentListeners() {
+  document.removeEventListener('mousemove', onMouseMove);
+  document.removeEventListener('mouseup', onMouseUp);
+}
+
+onUnmounted(stopDrag);
+
 function onMouseDown(e: MouseEvent) {
   if (!imageLoaded.value || imageError.value) return;
   const pos = getRelativePos(e);
@@ -145,6 +154,7 @@ function onMouseDown(e: MouseEvent) {
       mode.value = 'moving';
       dragStart.value = pos;
       dragStartBox.value = { ...b };
+      addDocumentListeners();
       return;
     }
   }
@@ -153,6 +163,7 @@ function onMouseDown(e: MouseEvent) {
   mode.value = 'drawing';
   dragStart.value = pos;
   emit('update:cropBox', { x: pos.x, y: pos.y, w: 0, h: 0 });
+  addDocumentListeners();
 }
 
 function onMouseMove(e: MouseEvent) {
@@ -221,13 +232,10 @@ function onMouseMove(e: MouseEvent) {
 function stopDrag() {
   mode.value = 'idle';
   dragStartBox.value = null;
+  removeDocumentListeners();
 }
 
 function onMouseUp() {
-  stopDrag();
-}
-
-function onMouseLeave() {
   stopDrag();
 }
 
@@ -237,6 +245,7 @@ function startResize(handle: string, e: MouseEvent) {
   activeHandle.value = handle;
   dragStart.value = getRelativePos(e);
   dragStartBox.value = { ...props.cropBox };
+  addDocumentListeners();
 }
 
 // ---------------------------------------------------------------------------
