@@ -4,8 +4,10 @@ import com.cropit.backend.model.CropJob;
 import com.cropit.backend.model.JobState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
@@ -19,8 +21,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -33,6 +38,10 @@ import java.util.concurrent.TimeUnit;
  * pdftoppm applies the {@code -x/-y/-W/-H} crop window, the longer side of the resulting
  * PNG is still exactly {@value #TARGET_LONG_SIDE} px. See {@link #renderAllPages} for the
  * detailed calculation.
+ *
+ * <p>Final rendering uses a fixed-size pool of {@code pdftoppm} worker processes to
+ * parallelise page-batch conversion. The pool size defaults to 8 and is configurable
+ * via {@code cropit.render.worker-pool-size} in {@code application.properties}.
  */
 @Service
 public class PdfService {
@@ -48,21 +57,52 @@ public class PdfService {
      */
     static final int TARGET_LONG_SIDE = 1540;
 
+    /**
+     * Number of concurrent {@code pdftoppm} worker processes used during final rendering.
+     * Configurable via {@code cropit.render.worker-pool-size} in {@code application.properties}.
+     * Default is 8.
+     */
+    @Value("${cropit.render.worker-pool-size:8}")
+    private int workerPoolSize;
+
+    /** Single-thread executor that dispatches the overall async render job. */
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "pdf-render-thread");
         t.setDaemon(true);
         return t;
     });
 
+    /**
+     * Fixed-size thread pool for running {@code pdftoppm} page-batch processes in parallel.
+     * Initialised in {@link #init()} after Spring has injected {@link #workerPoolSize}.
+     */
+    private ExecutorService workerPool;
+
+    @PostConstruct
+    public void init() {
+        java.util.concurrent.atomic.AtomicInteger idx = new java.util.concurrent.atomic.AtomicInteger(1);
+        workerPool = Executors.newFixedThreadPool(workerPoolSize, r -> {
+            Thread t = new Thread(r, "pdftoppm-worker-" + idx.getAndIncrement());
+            t.setDaemon(true);
+            return t;
+        });
+        log.info("pdftoppm worker pool initialised with {} threads", workerPoolSize);
+    }
+
     @PreDestroy
     public void shutdown() {
         executor.shutdown();
+        workerPool.shutdown();
         try {
             if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
                 executor.shutdownNow();
             }
+            if (!workerPool.awaitTermination(10, TimeUnit.SECONDS)) {
+                workerPool.shutdownNow();
+            }
         } catch (InterruptedException e) {
             executor.shutdownNow();
+            workerPool.shutdownNow();
             Thread.currentThread().interrupt();
         }
     }
@@ -196,39 +236,71 @@ public class PdfService {
         Path outputDir = job.getJobDir().resolve("output");
         Path pdfPath = job.getPdfPath();
 
-        // Process pages in batches of BATCH_SIZE
+        // Submit all page batches to the worker pool concurrently.
+        // Each pdftoppm process writes to non-overlapping page numbers (e.g. page-001.png
+        // through page-010.png for the first batch), so there are no output-file collisions.
+        List<Future<Void>> futures = new ArrayList<>();
         for (int start = 1; start <= total; start += BATCH_SIZE) {
-            int end = Math.min(start + BATCH_SIZE - 1, total);
+            final int batchStart = start;
+            final int batchEnd = Math.min(start + BATCH_SIZE - 1, total);
+            final String outputPrefix = outputDir.resolve("page").toString();
 
-            String outputPrefix = outputDir.resolve("page").toString();
+            futures.add(workerPool.submit((Callable<Void>) () -> {
+                List<String> cmd = new ArrayList<>(List.of(
+                        "pdftoppm",
+                        "-png",
+                        "-r", "200",
+                        "-scale-to", String.valueOf(scaleTo),
+                        "-x", String.valueOf(cropXScaled),
+                        "-y", String.valueOf(cropYScaled),
+                        "-W", String.valueOf(cropWScaled),
+                        "-H", String.valueOf(cropHScaled),
+                        "-f", String.valueOf(batchStart),
+                        "-l", String.valueOf(batchEnd),
+                        pdfPath.toString(),
+                        outputPrefix
+                ));
 
-            List<String> cmd = new ArrayList<>(List.of(
-                    "pdftoppm",
-                    "-png",
-                    "-r", "200",
-                    "-scale-to", String.valueOf(scaleTo),
-                    "-x", String.valueOf(cropXScaled),
-                    "-y", String.valueOf(cropYScaled),
-                    "-W", String.valueOf(cropWScaled),
-                    "-H", String.valueOf(cropHScaled),
-                    "-f", String.valueOf(start),
-                    "-l", String.valueOf(end),
-                    pdfPath.toString(),
-                    outputPrefix
-            ));
+                runProcess(cmd, "pdftoppm render batch " + batchStart + "-" + batchEnd);
 
-            runProcess(cmd, "pdftoppm render batch " + start + "-" + end);
+                // Update progress atomically: each worker increments by the number of
+                // pages it just completed.
+                job.getDonePages().addAndGet(batchEnd - batchStart + 1);
+                return null;
+            }));
+        }
 
-            // Register newly created output files – collect all output PNGs atomically
-            List<Path> newFiles = listPngsInDir(outputDir);
-            synchronized (job) {
-                job.clearOutputFiles();
-                for (Path f : newFiles) {
-                    job.addOutputFile(f.getFileName().toString());
+        // Wait for all batches to complete; surface the first failure if any.
+        IOException firstError = null;
+        for (Future<Void> future : futures) {
+            try {
+                future.get();
+            } catch (InterruptedException e) {
+                // Propagate interrupt: cancel still-queued futures and rethrow.
+                futures.forEach(f -> f.cancel(true));
+                Thread.currentThread().interrupt();
+                throw new IOException("Render interrupted while waiting for workers", e);
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (firstError == null) {
+                    firstError = cause instanceof IOException ioe
+                            ? ioe
+                            : new IOException("Batch render failed: " + cause.getMessage(), cause);
                 }
             }
+        }
 
-            job.getDonePages().set(end);
+        if (firstError != null) {
+            throw firstError;
+        }
+
+        // Register all output PNGs produced by the parallel workers.
+        List<Path> allFiles = listPngsInDir(outputDir);
+        synchronized (job) {
+            job.clearOutputFiles();
+            for (Path f : allFiles) {
+                job.addOutputFile(f.getFileName().toString());
+            }
         }
     }
 

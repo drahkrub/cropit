@@ -179,30 +179,64 @@ original crop aspect ratio to within 1 px.
 
 ---
 
-## Batching & Progress Strategy
+## Batching & Parallel Pool Strategy
 
-Full-page rendering can take a long time for large PDFs. To allow progress
-reporting without complex multi-threading, the render is broken into **batches of
-10 pages**:
+Full-page rendering can take a long time for large PDFs. Pages are divided into
+**batches of 10** and all batches are submitted concurrently to a fixed-size
+thread pool. Each pool thread runs one `pdftoppm` process for its assigned page
+range.
 
 ```java
+// All batches are submitted at once; the pool limits concurrency.
 for (int start = 1; start <= total; start += BATCH_SIZE) {
-    int end = Math.min(start + BATCH_SIZE - 1, total);
-    // run pdftoppm for pages start..end
-    job.getDonePages().set(end);
+    final int batchStart = start;
+    final int batchEnd = Math.min(start + BATCH_SIZE - 1, total);
+    futures.add(workerPool.submit(() -> {
+        // run pdftoppm for pages batchStart..batchEnd
+        job.getDonePages().addAndGet(batchEnd - batchStart + 1);
+        return null;
+    }));
 }
+// Wait for all futures; surface first error if any.
+for (Future<Void> f : futures) { f.get(); }
 ```
 
-After each batch, `CropJob.donePages` is updated atomically. The frontend polls
-`GET /api/jobs/{id}/status` every 1.5 seconds and renders a progress bar:
+### Configuration
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `cropit.render.worker-pool-size` | `8` | Number of concurrent `pdftoppm` processes during final rendering. Set in `application.properties`. |
+
+The pool is bounded: at most `worker-pool-size` `pdftoppm` processes run at any
+time, so memory and CPU usage are predictable even for very large PDFs.
+
+### Progress reporting
+
+Each worker increments `CropJob.donePages` atomically with `addAndGet` as soon
+as its batch finishes. The frontend polls `GET /api/jobs/{id}/status` every 1.5
+seconds and computes:
 
 ```
 donePages / totalPages
 ```
 
-The entire render loop runs on a single dedicated daemon thread
-(`Executors.newSingleThreadExecutor()`). This keeps the design simple while
-ensuring that the HTTP thread never blocks.
+Because batches complete in any order, progress increments are not perfectly
+linear, but the counter always moves forward and reaches `totalPages` exactly
+when all workers are done.
+
+### Output-file safety
+
+`pdftoppm` names output files using the page number it renders, e.g.
+`page-001.png` for page 1. Because each batch covers a non-overlapping page
+range, parallel workers never write to the same file name. No additional locking
+or per-batch output directories are needed.
+
+### Error handling
+
+If any batch fails (non-zero `pdftoppm` exit code), the `IOException` is
+captured and re-thrown after all futures have been awaited. The job transitions
+to `ERROR` state and the error message is surfaced to the client via the status
+endpoint.
 
 ---
 
