@@ -90,7 +90,7 @@ const containerRef = ref<HTMLElement | null>(null);
 const imageLoaded = ref(false);
 const imageError = ref(false);
 
-type DragMode = 'idle' | 'drawing' | 'moving' | 'resizing';
+type DragMode = 'idle' | 'moving' | 'resizing';
 const mode = ref<DragMode>('idle');
 const dragStart = ref({ x: 0, y: 0 });
 const dragStartBox = ref<CropBox | null>(null);
@@ -166,46 +166,28 @@ function removeDocumentListeners() {
 onUnmounted(stopDrag);
 
 function onMouseDown(e: MouseEvent) {
-  if (!imageLoaded.value || imageError.value) return;
+  if (!imageLoaded.value || imageError.value || !props.cropBox) return;
   const pos = getRelativePos(e);
 
   // If clicking inside the existing crop rect → start moving
-  if (props.cropBox) {
-    const b = props.cropBox;
-    const pad = 0.015; // inner dead-zone (avoids accidental move near edges)
-    if (
-      pos.x >= b.x + pad &&
-      pos.x <= b.x + b.w - pad &&
-      pos.y >= b.y + pad &&
-      pos.y <= b.y + b.h - pad
-    ) {
-      mode.value = 'moving';
-      dragStart.value = pos;
-      dragStartBox.value = { ...b };
-      addDocumentListeners();
-      return;
-    }
+  const b = props.cropBox;
+  const pad = 0.015; // inner dead-zone (avoids accidental move near edges)
+  if (
+    pos.x >= b.x + pad &&
+    pos.x <= b.x + b.w - pad &&
+    pos.y >= b.y + pad &&
+    pos.y <= b.y + b.h - pad
+  ) {
+    mode.value = 'moving';
+    dragStart.value = pos;
+    dragStartBox.value = { ...b };
+    addDocumentListeners();
   }
-
-  // Otherwise → start drawing a new crop rect
-  mode.value = 'drawing';
-  dragStart.value = pos;
-  emit('update:cropBox', { x: pos.x, y: pos.y, w: 0, h: 0 });
-  addDocumentListeners();
 }
 
 function onMouseMove(e: MouseEvent) {
   if (mode.value === 'idle') return;
   const pos = getRelativePos(e);
-
-  if (mode.value === 'drawing') {
-    const x = Math.min(pos.x, dragStart.value.x);
-    const y = Math.min(pos.y, dragStart.value.y);
-    const w = Math.abs(pos.x - dragStart.value.x);
-    const h = Math.abs(pos.y - dragStart.value.y);
-    emit('update:cropBox', { x, y, w, h });
-    return;
-  }
 
   if (mode.value === 'moving' && dragStartBox.value) {
     const b = dragStartBox.value;
@@ -438,7 +420,7 @@ const overlayRightStyle = computed(() => {
   width: 100%;
   background: #1a1a1a;
   overflow: hidden;
-  cursor: crosshair;
+  cursor: default;
   user-select: none;
   border-radius: 4px;
   min-height: 160px;

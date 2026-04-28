@@ -23,8 +23,8 @@ User                     Quasar Frontend               Spring Boot Backend
  │                             │ ◄────────────────────────────-│
  │                             │ { jobId, previews[], … }      │
  │                             │                               │
- │ 2. Preview images shown     │                               │
- │    Draw crop box            │                               │
+│ 2. Preview images shown     │                               │
+│    Adjust default crop box  │                               │
  │                             │                               │
  │ 3. Click "Render"           │                               │
  │                             │ POST /api/jobs/{id}/render    │

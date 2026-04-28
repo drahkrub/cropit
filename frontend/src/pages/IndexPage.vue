@@ -59,7 +59,7 @@
           <div class="text-subtitle1 q-mb-sm">
             Step 2 – Define Crop Box
             <span class="text-grey-6 text-body2 q-ml-sm">
-              (drag to draw, move, or resize the yellow rectangle across all previews)
+              (the crop box is created automatically; you can move or resize it across all previews)
             </span>
           </div>
 
@@ -93,10 +93,10 @@
               v-if="cropBox"
               flat
               dense
-              icon="clear"
-              label="Clear crop"
+              icon="restart_alt"
+              label="Reset crop"
               color="negative"
-              @click="clearCrop"
+              @click="resetCrop"
             />
           </div>
 
@@ -138,7 +138,7 @@
           </div>
 
           <div v-else class="text-grey-5 text-body2">
-            Draw a crop rectangle on any preview image to get started.
+            The crop box is created automatically as soon as the preview images finish loading.
           </div>
         </q-card-section>
       </q-card>
@@ -239,13 +239,23 @@ const previewPageIndices = ref<number[]>([]);
 // Crop state
 // ---------------------------------------------------------------------------
 const cropBox = ref<CropBox | null>(null);
+const DEFAULT_CROP_INSET = 0.05;
+
+function createDefaultCropBox(): CropBox {
+  return {
+    x: DEFAULT_CROP_INSET,
+    y: DEFAULT_CROP_INSET,
+    w: 1 - (DEFAULT_CROP_INSET * 2),
+    h: 1 - (DEFAULT_CROP_INSET * 2),
+  };
+}
 
 function onCropUpdate(box: CropBox) {
   cropBox.value = { ...box };
 }
 
-function clearCrop() {
-  cropBox.value = null;
+function resetCrop() {
+  cropBox.value = createDefaultCropBox();
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +266,9 @@ const imageSizes = ref<(Size | null)[]>([]);
 
 function onImageSize(index: number, w: number, h: number) {
   imageSizes.value[index] = { w, h };
+  if (!cropBox.value) {
+    cropBox.value = createDefaultCropBox();
+  }
 }
 
 /** Use the first available image size as the reference for pixel conversion */
