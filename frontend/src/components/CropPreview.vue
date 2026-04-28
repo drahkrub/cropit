@@ -112,12 +112,12 @@ const STEP_SHIFT = 10;  // px
 // ---------------------------------------------------------------------------
 const HANDLES = [
   { name: 'nw', label: 'Northwest' },
-  { name: 'n',  label: 'North' },
+  { name: 'n', label: 'North' },
   { name: 'ne', label: 'Northeast' },
-  { name: 'w',  label: 'West' },
+  { name: 'w', label: 'West' },
   { name: 'e',  label: 'East' },
   { name: 'sw', label: 'Southwest' },
-  { name: 's',  label: 'South' },
+  { name: 's', label: 'South' },
   { name: 'se', label: 'Southeast' },
 ] as const;
 
@@ -322,7 +322,8 @@ function onKeyDown(e: KeyboardEvent) {
   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
   e.preventDefault(); // prevent page scrolling
 
-  const rect = containerRef.value!.getBoundingClientRect();
+  const rect = containerRef.value?.getBoundingClientRect();
+  if (!rect) return;
   const stepPx = e.shiftKey ? STEP_SHIFT : STEP_NORMAL;
   const dx = stepPx / rect.width;
   const dy = stepPx / rect.height;
