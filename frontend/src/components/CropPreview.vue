@@ -59,7 +59,6 @@
             { 'crop-handle--kb-active': keyboardMode === 'handle' && keyboardHandle === h.name },
           ]"
           @focus="onHandleFocus(h.name)"
-          @keydown="onKeyDown"
           @mousedown.stop.prevent="startResize(h.name, $event)"
           @click.stop="onHandleClick(h.name)"
         />
