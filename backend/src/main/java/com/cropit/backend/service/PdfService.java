@@ -39,14 +39,19 @@ import java.util.concurrent.TimeUnit;
  * PNG is still exactly {@value #TARGET_LONG_SIDE} px. See {@link #renderAllPages} for the
  * detailed calculation.
  *
- * <p>Final rendering uses a fixed-size pool of {@code pdftoppm} worker processes to
- * parallelise page-batch conversion. The pool size defaults to 8 and is configurable
- * via {@code cropit.render.worker-pool-size} in {@code application.properties}.
+ * <p>Both preview generation and final rendering use a shared fixed-size pool of
+ * {@code pdftoppm} worker processes.  Preview pages are processed in batches of
+ * {@value #PREVIEW_BATCH_SIZE}; final render batches are {@value #BATCH_SIZE} pages each.
+ * The pool size defaults to 8 and is configurable via
+ * {@code cropit.render.worker-pool-size} in {@code application.properties}.
  */
 @Service
 public class PdfService {
 
     private static final Logger log = LoggerFactory.getLogger(PdfService.class);
+
+    /** Batch size for preview generation (number of pages per pdftoppm invocation). */
+    private static final int PREVIEW_BATCH_SIZE = 4;
 
     /** Batch size for full-page rendering (number of pages per pdftoppm invocation). */
     private static final int BATCH_SIZE = 10;
@@ -58,7 +63,8 @@ public class PdfService {
     static final int TARGET_LONG_SIDE = 1540;
 
     /**
-     * Number of concurrent {@code pdftoppm} worker processes used during final rendering.
+     * Number of concurrent {@code pdftoppm} worker processes shared between preview
+     * generation and final rendering.
      * Configurable via {@code cropit.render.worker-pool-size} in {@code application.properties}.
      * Default is 8.
      */
@@ -112,8 +118,9 @@ public class PdfService {
     // -------------------------------------------------------------------------
 
     /**
-     * Generates up to {@code previewCount} preview PNGs for the given job.
-     * The files are written to {@code {jobDir}/preview/page-NNN.png}.
+     * Generates up to {@code previewCount} preview PNGs for the given job using the
+     * shared worker pool.  Pages are processed in batches of {@value #PREVIEW_BATCH_SIZE}
+     * concurrently.  The files are written to {@code {jobDir}/preview/page-NNN.png}.
      * On success the job state transitions to {@link JobState#PREVIEWS_READY}.
      *
      * @return list of relative file names that were created (e.g. {@code ["page-001.png", ...]})
@@ -123,22 +130,56 @@ public class PdfService {
         Path previewDir = job.getJobDir().resolve("preview");
         int count = job.getPreviewCount();
 
-        // Pass -l count directly; pdftoppm stops at the actual last page even when
-        // count exceeds the page count, so no upfront pdfinfo call is needed.
+        // Pass -l batchEnd directly; pdftoppm stops at the actual last page even when
+        // batchEnd exceeds the page count, so no upfront pdfinfo call is needed.
         String outputPrefix = previewDir.resolve("page").toString();
 
-        List<String> cmd = new ArrayList<>(List.of(
-                "pdftoppm",
-                "-png",
-                "-r", "200",
-                "-scale-to", String.valueOf(TARGET_LONG_SIDE),
-                "-f", "1",
-                "-l", String.valueOf(count),
-                pdfPath.toString(),
-                outputPrefix
-        ));
+        // Submit preview batches to the worker pool concurrently.
+        // Each batch covers a non-overlapping page range (e.g. pages 1-4, 5-8, ...).
+        // pdftoppm names output files by page number so there are no file collisions.
+        List<Future<Void>> futures = new ArrayList<>();
+        for (int start = 1; start <= count; start += PREVIEW_BATCH_SIZE) {
+            final int batchStart = start;
+            final int batchEnd = Math.min(start + PREVIEW_BATCH_SIZE - 1, count);
 
-        runProcess(cmd, "pdftoppm preview");
+            futures.add(workerPool.submit((Callable<Void>) () -> {
+                List<String> cmd = new ArrayList<>(List.of(
+                        "pdftoppm",
+                        "-png",
+                        "-r", "200",
+                        "-scale-to", String.valueOf(TARGET_LONG_SIDE),
+                        "-f", String.valueOf(batchStart),
+                        "-l", String.valueOf(batchEnd),
+                        pdfPath.toString(),
+                        outputPrefix
+                ));
+                runProcess(cmd, "pdftoppm preview batch " + batchStart + "-" + batchEnd);
+                return null;
+            }));
+        }
+
+        // Wait for all batches to complete; surface the first failure if any.
+        IOException firstError = null;
+        for (Future<Void> future : futures) {
+            try {
+                future.get();
+            } catch (InterruptedException e) {
+                futures.forEach(f -> f.cancel(true));
+                Thread.currentThread().interrupt();
+                throw new IOException("Preview generation interrupted while waiting for workers", e);
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (firstError == null) {
+                    firstError = cause instanceof IOException ioe
+                            ? ioe
+                            : new IOException("Batch preview failed: " + cause.getMessage(), cause);
+                }
+            }
+        }
+
+        if (firstError != null) {
+            throw firstError;
+        }
 
         // Collect created files and read the dimensions of the first one
         List<Path> files = listPngsInDir(previewDir);

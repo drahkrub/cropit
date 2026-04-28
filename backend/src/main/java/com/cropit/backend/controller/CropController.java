@@ -58,7 +58,7 @@ public class CropController {
      * <p>Request: {@code multipart/form-data}
      * <ul>
      *   <li>{@code file}         – the PDF file</li>
-     *   <li>{@code previewCount} – number of previews to generate (1–20, default 4)</li>
+     *   <li>{@code previewCount} – number of previews to generate (1–20, default 16)</li>
      * </ul>
      *
      * <p>Response:
@@ -76,7 +76,7 @@ public class CropController {
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Map<String, Object>> upload(
             @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "previewCount", defaultValue = "4") int previewCount) {
+            @RequestParam(value = "previewCount", defaultValue = "16") int previewCount) {
 
         // Validate inputs
         if (file.isEmpty()) {

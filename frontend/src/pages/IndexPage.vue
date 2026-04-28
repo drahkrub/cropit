@@ -220,7 +220,7 @@ import CropPreview from 'components/CropPreview.vue';
 // Upload state
 // ---------------------------------------------------------------------------
 const selectedFile = ref<File | null>(null);
-const previewCount = ref<number>(4);
+const previewCount = ref<number>(16);
 const uploading = ref(false);
 const uploadError = ref<string | null>(null);
 
