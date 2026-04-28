@@ -101,11 +101,11 @@ npm run lint
 
 1. **Upload a PDF** using the file picker and choose the number of preview pages (1–20).
 2. Click **"Upload & Generate Previews"** – the backend generates PNGs via `pdftoppm` and displays them.
-3. **Draw a crop box** by clicking and dragging on any preview image.
+3. A **crop box is created automatically** after the preview images load.
    - **Move** the rectangle by clicking inside it and dragging.
    - **Resize** it using the eight yellow handles.
+   - Clicking outside the rectangle does **not** replace it with a new crop box.
    - The rectangle is mirrored across all previews simultaneously.
 4. Click **"Render All Pages with Crop Box"** to start the full conversion.
 5. Watch the **progress bar** as pages are processed in batches of 10.
 6. When done, **download links** for the generated PNGs appear.
-
