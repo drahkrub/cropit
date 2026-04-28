@@ -1,4 +1,5 @@
 <template>
+  <!-- Capture phase is required so arrow keys from focused handles do not scroll the page. -->
   <div
     ref="containerRef"
     class="crop-preview"
@@ -6,7 +7,7 @@
       'crop-preview--active': mode !== 'idle',
       'crop-preview--kb-box': keyboardMode === 'box',
     }"
-    :tabindex="cropBox ? '0' : '-1'"
+    :tabindex="cropBox ? 0 : -1"
     aria-label="Page preview crop editor"
     @mousedown.prevent="onMouseDown"
     @click="onContainerClick"
@@ -51,7 +52,7 @@
           v-for="h in HANDLES"
           :key="h.name"
           role="button"
-          :tabindex="cropBox ? '0' : '-1'"
+          :tabindex="cropBox ? 0 : -1"
           :aria-label="`${h.label} resize handle`"
           :class="[
             'crop-handle',
