@@ -1,18 +1,12 @@
 <template>
-  <!-- Capture phase is required so arrow keys from focused handles do not scroll the page. -->
   <div
     ref="containerRef"
     class="crop-preview"
-    :class="{
-      'crop-preview--active': mode !== 'idle',
-      'crop-preview--kb-box': keyboardMode === 'box',
-    }"
-    :tabindex="cropBox ? 0 : -1"
+    tabindex="-1"
     aria-label="Page preview crop editor"
     @mousedown.prevent="onMouseDown"
     @click="onContainerClick"
-    @focus="onContainerFocus"
-    @keydown.capture="onKeyDown"
+    @keydown="onKeyDown"
     @blur="onContainerBlur"
   >
     <!-- Page image -->
@@ -41,25 +35,21 @@
       <div class="crop-overlay crop-overlay--right" :style="overlayRightStyle" />
 
       <!-- Crop rectangle border -->
-      <div
-        class="crop-rect"
-        :class="{ 'crop-rect--kb-selected': keyboardMode !== 'none' }"
-        :style="cropRectStyle"
-        @click.stop="onBoxClick"
+        <div
+          class="crop-rect"
+          :class="{ 'crop-rect--kb-selected': keyboardMode !== 'none' }"
+          :style="cropRectStyle"
+          @click.stop="onBoxClick"
       >
         <!-- Eight resize handles -->
         <div
           v-for="h in HANDLES"
           :key="h.name"
-          role="button"
-          :tabindex="cropBox ? 0 : -1"
-          :aria-label="`${h.label} resize handle`"
           :class="[
             'crop-handle',
             `crop-handle--${h.name}`,
             { 'crop-handle--kb-active': keyboardMode === 'handle' && keyboardHandle === h.name },
           ]"
-          @focus="onHandleFocus(h.name)"
           @mousedown.stop.prevent="startResize(h.name, $event)"
           @click.stop="onHandleClick(h.name)"
         />
@@ -304,19 +294,6 @@ function onHandleClick(handle: string) {
   containerRef.value?.focus();
 }
 
-function onContainerFocus(e: FocusEvent) {
-  if (!props.cropBox) return;
-  if (e.target !== e.currentTarget) return;
-  keyboardMode.value = 'box';
-  keyboardHandle.value = '';
-}
-
-function onHandleFocus(handle: string) {
-  if (!props.cropBox) return;
-  keyboardMode.value = 'handle';
-  keyboardHandle.value = handle;
-}
-
 function onContainerClick() {
   // A click that bubbles to the container (outside crop-rect) clears selection.
   keyboardMode.value = 'none';
@@ -465,15 +442,6 @@ const overlayRightStyle = computed(() => {
   user-select: none;
   border-radius: 4px;
   min-height: 160px;
-
-  &--active {
-    cursor: crosshair;
-  }
-
-  &:focus-visible {
-    outline: 2px dashed #ffcc00;
-    outline-offset: 2px;
-  }
 }
 
 .preview-image {
@@ -505,9 +473,6 @@ const overlayRightStyle = computed(() => {
   pointer-events: none;
 
   &--top    { top: 0; }
-  &--left   { }
-  &--right  { }
-  &--bottom { }
 }
 
 .crop-rect {

@@ -14,8 +14,7 @@ visual-AI (LLM) Markdown extraction quality.
 the actual page content, and then generate consistently cropped PNGs for every
 page — all while preserving the important rendering parameters `-r 200 -scale-to 1540`.
 
-See [`DESIGN.md`](DESIGN.md) for the full architecture and design rationale.  
-See [`docs/keyboard-crop-positioning-plan.md`](docs/keyboard-crop-positioning-plan.md) for the planned keyboard-based pixel-precise crop-box positioning feature.
+See [`DESIGN.md`](DESIGN.md) for the full architecture and design rationale.
 
 ---
 
@@ -109,4 +108,3 @@ npm run lint
 4. Click **"Render All Pages with Crop Box"** to start the full conversion.
 5. Watch the **progress bar** as pages are processed in batches of 10.
 6. When done, **download links** for the generated PNGs appear.
-
