@@ -119,18 +119,63 @@ After generation, the natural pixel dimensions of the first PNG are read from th
 file (via the PNG IHDR header bytes) and stored in `CropJob`. These dimensions are
 needed later for the crop-coordinate conversion.
 
-### pdftoppm – Full-Page Render with Crop
+### pdftoppm – Crop Render with Exact Output Sizing
 
 ```
-pdftoppm -png -r 200 -scale-to 1540 \
-         -x <cropX> -y <cropY> -W <cropW> -H <cropH> \
+pdftoppm -png -r 200 -scale-to <S_adj> \
+         -x <cropX_s> -y <cropY_s> -W <cropW_s> -H <cropH_s> \
          -f <start> -l <end> \
          input.pdf <jobDir>/output/page
 ```
 
-The `-r 200 -scale-to 1540` parameters are **always preserved**, ensuring the
-rendered pages are identical in scale to the previews. The `-x/-y/-W/-H` flags
-restrict each page to the selected crop region.
+#### Why `-scale-to` must be adjusted for crop rendering
+
+When `pdftoppm` is called with `-scale-to S` **and** `-x/-y/-W/-H`, it renders
+the full page so its longer side equals `S` pixels, then crops the requested
+window out of that rendering. The resulting PNG has dimensions exactly `W × H`.
+
+If `S = TARGET_LONG_SIDE = 1540` and the crop window is smaller than the full
+page, the output PNG's longer side is smaller than 1540 — violating the
+downstream LLM requirement.
+
+#### Corrective formula
+
+Let `L = max(cropW, cropH)` (longer crop side in the 1540-px preview space).
+
+```
+S_adj = round(TARGET_LONG_SIDE² / L)
+```
+
+All four crop parameters are then scaled to the new rendering space:
+
+```
+cropX_s = round(cropX × S_adj / TARGET_LONG_SIDE)
+cropY_s = round(cropY × S_adj / TARGET_LONG_SIDE)
+cropW_s = round(cropW × S_adj / TARGET_LONG_SIDE)
+cropH_s = round(cropH × S_adj / TARGET_LONG_SIDE)
+```
+
+Due to integer rounding the longer scaled dimension may be `TARGET_LONG_SIDE ± 1`.
+The specification explicitly permits correcting crop parameters by up to 1 px, so
+the longer dimension is forced to exactly `TARGET_LONG_SIDE` after scaling:
+
+```java
+if (cropH >= cropW) cropH_s = TARGET_LONG_SIDE;
+else                cropW_s = TARGET_LONG_SIDE;
+```
+
+**Result:** The cropped output PNG always has its longer side = 1540 px, with no
+post-process upscaling.  The shorter side scales proportionally, preserving the
+original crop aspect ratio to within 1 px.
+
+#### Verification example (user's bug report)
+
+| Parameter | Before fix | After fix |
+|-----------|-----------|-----------|
+| `-scale-to` | `1540` | `1678` |
+| `-W` | `970` | `1057` |
+| `-H` | `1414` | `1540` |
+| Output size | `970 × 1414` | `1057 × 1540` ✓ |
 
 ---
 
@@ -168,7 +213,7 @@ The Quasar frontend stores the crop box in **normalised coordinates** (values in
 the preview image fills the container with `width: 100%; height: auto`, the
 displayed proportions match the image's natural pixel dimensions.
 
-The conversion to pixel coordinates for `pdftoppm -x/-y/-W/-H` is:
+The initial conversion to preview-space pixel coordinates is:
 
 ```
 cropX_px = round(cropBox.x * previewImageWidth)
@@ -178,11 +223,14 @@ cropH_px = round(cropBox.h * previewImageHeight)
 ```
 
 where `previewImageWidth` and `previewImageHeight` are the pixel dimensions of the
-first generated preview PNG (stored in `CropJob` after preview generation).
+first generated preview PNG (stored in `CropJob` after preview generation, always
+with its longer side = 1540 px).
 
-Because the full render uses **the same `-r 200 -scale-to 1540` parameters**, the
-output pixel dimensions for each page are identical to the preview dimensions.
-Therefore, the same pixel-crop values apply correctly to all pages.
+These values are then passed to `computeScaledCropParams()` which derives the
+adjusted `-scale-to` value and re-scales the crop parameters so that the longer
+side of the final cropped output PNG equals exactly 1540 px. See the
+[pdftoppm crop rendering section](#pdftoppm--crop-render-with-exact-output-sizing)
+above for the full derivation.
 
 > **Assumption:** All pages in the PDF have the same dimensions. If they differ,
 > the crop region in normalised coordinates will be applied relative to the first
@@ -219,6 +267,20 @@ the same origin.
 
 In addition, the backend enables CORS for `localhost:*` via `WebConfig` as a
 safety net.
+
+---
+
+## Frontend Preview Sizing
+
+Each preview column in the Quasar interface is rendered at a fixed CSS width
+(`flex: 0 0 560px`) so the crop box can be placed precisely. The preview row
+uses horizontal scrolling (`overflow-x: auto`) to accommodate multiple pages
+side by side regardless of how many previews are generated.
+
+The displayed preview size is intentionally large (~560 px wide) so that small
+crop adjustments are visually distinguishable. All crop coordinates are still
+stored as normalised values (0…1), so the display size has no effect on the
+accuracy of the final render.
 
 ---
 

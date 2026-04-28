@@ -481,9 +481,10 @@ function px(norm: number, size: number) {
 }
 
 .preview-col {
-  /* Each preview takes a fixed minimum width; images are never squashed below this */
-  flex: 0 0 280px;
-  max-width: 400px;
+  /* Each preview takes a fixed minimum width; images are never squashed below this.
+     Set to ~double the original size so the crop box can be placed precisely. */
+  flex: 0 0 560px;
+  max-width: 800px;
 }
 
 .mono-grid {
