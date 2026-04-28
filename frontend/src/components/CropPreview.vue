@@ -115,7 +115,7 @@ const HANDLES = [
   { name: 'n', label: 'North' },
   { name: 'ne', label: 'Northeast' },
   { name: 'w', label: 'West' },
-  { name: 'e',  label: 'East' },
+  { name: 'e', label: 'East' },
   { name: 'sw', label: 'Southwest' },
   { name: 's', label: 'South' },
   { name: 'se', label: 'Southeast' },
