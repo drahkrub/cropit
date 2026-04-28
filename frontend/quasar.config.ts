@@ -78,7 +78,15 @@ export default defineConfig((/* ctx */) => {
     // Full list of options: https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#devserver
     devServer: {
       // https: true,
-      open: false // set to true to open browser automatically
+      open: false, // set to true to open browser automatically
+      // Proxy /api requests to the Spring Boot backend during development.
+      // Start the backend with: cd backend && mvn spring-boot:run
+      proxy: {
+        '/api': {
+          target: 'http://localhost:8080',
+          changeOrigin: true,
+        },
+      },
     },
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#framework
