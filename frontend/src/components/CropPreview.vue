@@ -59,10 +59,9 @@
     <!-- Label -->
     <div class="page-label text-caption text-white">{{ label }}</div>
 
-    <!-- Accessible live region (screen-reader announcements) -->
-    <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
-      {{ ariaStatusText }}
-    </div>
+  </div>
+  <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+    {{ ariaStatusText }}
   </div>
 </template>
 
@@ -381,9 +380,9 @@ function onKeyDown(e: KeyboardEvent) {
 const ariaStatusText = computed(() => {
   if (!props.cropBox) return 'No crop box defined.';
   if (keyboardMode.value === 'none') return 'Crop box present. Click to select.';
-  if (keyboardMode.value === 'box')  return 'Crop box selected. Use arrow keys to move.';
+  if (keyboardMode.value === 'box') return 'Crop box selected. Use arrow keys to move. Press Escape to clear selection.';
   const h = HANDLES.find((hh) => hh.name === keyboardHandle.value);
-  return `${h?.label ?? keyboardHandle.value} handle selected. Use arrow keys to resize.`;
+  return `${h?.label ?? keyboardHandle.value} handle selected. Use arrow keys to resize. Press Escape to return to box selection.`;
 });
 
 // ---------------------------------------------------------------------------
