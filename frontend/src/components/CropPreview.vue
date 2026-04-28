@@ -10,6 +10,7 @@
     aria-label="Page preview crop editor"
     @mousedown.prevent="onMouseDown"
     @click="onContainerClick"
+    @focus="onContainerFocus"
     @keydown="onKeyDown"
     @blur="onContainerBlur"
   >
@@ -57,6 +58,8 @@
             `crop-handle--${h.name}`,
             { 'crop-handle--kb-active': keyboardMode === 'handle' && keyboardHandle === h.name },
           ]"
+          @focus="onHandleFocus(h.name)"
+          @keydown="onKeyDown"
           @mousedown.stop.prevent="startResize(h.name, $event)"
           @click.stop="onHandleClick(h.name)"
         />
@@ -299,6 +302,18 @@ function onHandleClick(handle: string) {
   keyboardMode.value = 'handle';
   keyboardHandle.value = handle;
   containerRef.value?.focus();
+}
+
+function onContainerFocus() {
+  if (!props.cropBox) return;
+  keyboardMode.value = 'box';
+  keyboardHandle.value = '';
+}
+
+function onHandleFocus(handle: string) {
+  if (!props.cropBox) return;
+  keyboardMode.value = 'handle';
+  keyboardHandle.value = handle;
 }
 
 function onContainerClick() {
