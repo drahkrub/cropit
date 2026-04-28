@@ -76,7 +76,7 @@ backend/src/main/java/com/cropit/backend/
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/upload` | Upload PDF + choose preview count (1–20). Synchronously generates preview PNGs and returns their URLs. |
+| `POST` | `/api/upload` | Upload PDF + choose preview count (1–20, default 16). Synchronously generates preview PNGs and returns their URLs. |
 | `GET`  | `/api/jobs/{jobId}/status` | Returns current state, progress counters, and output file URLs. |
 | `POST` | `/api/jobs/{jobId}/render` | Accepts normalised crop box, starts async full-page render. Returns `202 Accepted`. |
 | `GET`  | `/api/jobs/{jobId}/files/preview/{filename}` | Serves a generated preview PNG. |
@@ -104,20 +104,29 @@ total page count. This value is used to:
 
 ### pdftoppm – Preview Generation
 
+Preview pages are generated using the shared worker pool in batches of 4 pages,
+mirroring the approach used for final rendering. Each batch is submitted as a
+separate `pdftoppm` invocation:
+
 ```
-pdftoppm -png -r 200 -scale-to 1540 -f 1 -l <N> input.pdf <jobDir>/preview/page
+pdftoppm -png -r 200 -scale-to 1540 -f <batchStart> -l <batchEnd> input.pdf <jobDir>/preview/page
 ```
 
 - `-png` – output format
 - `-r 200` – render at 200 DPI
 - `-scale-to 1540` – scale so the larger dimension is exactly 1540 px
-- `-f 1 -l N` – only render pages 1 through N (the requested preview count)
+- `-f <batchStart> -l <batchEnd>` – page range for this batch
+
+For example, a 16-page preview request with batch size 4 results in four
+concurrent `pdftoppm` processes covering pages 1–4, 5–8, 9–12, and 13–16.
 
 Output files follow the naming convention `page-001.png`, `page-002.png`, etc.
+Because each batch covers a non-overlapping page range, parallel workers never
+write to the same file. No additional locking is needed.
 
-After generation, the natural pixel dimensions of the first PNG are read from the
-file (via the PNG IHDR header bytes) and stored in `CropJob`. These dimensions are
-needed later for the crop-coordinate conversion.
+After all batches complete, the natural pixel dimensions of the first PNG are
+read from the file (via the PNG IHDR header bytes) and stored in `CropJob`.
+These dimensions are needed later for the crop-coordinate conversion.
 
 ### pdftoppm – Crop Render with Exact Output Sizing
 
@@ -181,10 +190,21 @@ original crop aspect ratio to within 1 px.
 
 ## Batching & Parallel Pool Strategy
 
-Full-page rendering can take a long time for large PDFs. Pages are divided into
-**batches of 10** and all batches are submitted concurrently to a fixed-size
-thread pool. Each pool thread runs one `pdftoppm` process for its assigned page
-range.
+Both preview generation and full-page rendering use a shared fixed-size worker
+pool.  All batches across both phases are submitted concurrently to the pool;
+its size limits the number of simultaneously running `pdftoppm` processes.
+
+### Preview generation
+
+Preview pages are split into **batches of 4** and submitted to the pool.  For
+example, a 16-page preview request results in four concurrent `pdftoppm`
+processes covering pages 1–4, 5–8, 9–12, and 13–16.
+
+### Full-page render
+
+Pages are divided into **batches of 10** and all batches are submitted
+concurrently to the pool. Each pool thread runs one `pdftoppm` process for its
+assigned page range.
 
 ```java
 // All batches are submitted at once; the pool limits concurrency.
@@ -205,16 +225,16 @@ for (Future<Void> f : futures) { f.get(); }
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `cropit.render.worker-pool-size` | `8` | Number of concurrent `pdftoppm` processes during final rendering. Set in `application.properties`. |
+| `cropit.render.worker-pool-size` | `8` | Number of concurrent `pdftoppm` processes shared between preview generation and final rendering. Set in `application.properties`. |
 
 The pool is bounded: at most `worker-pool-size` `pdftoppm` processes run at any
 time, so memory and CPU usage are predictable even for very large PDFs.
 
 ### Progress reporting
 
-Each worker increments `CropJob.donePages` atomically with `addAndGet` as soon
-as its batch finishes. The frontend polls `GET /api/jobs/{id}/status` every 1.5
-seconds and computes:
+Each render worker increments `CropJob.donePages` atomically with `addAndGet` as
+soon as its batch finishes. The frontend polls `GET /api/jobs/{id}/status` every
+1.5 seconds and computes:
 
 ```
 donePages / totalPages
