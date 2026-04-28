@@ -11,7 +11,7 @@
     @mousedown.prevent="onMouseDown"
     @click="onContainerClick"
     @focus="onContainerFocus"
-    @keydown="onKeyDown"
+    @keydown.capture="onKeyDown"
     @blur="onContainerBlur"
   >
     <!-- Page image -->
@@ -303,8 +303,9 @@ function onHandleClick(handle: string) {
   containerRef.value?.focus();
 }
 
-function onContainerFocus() {
+function onContainerFocus(e: FocusEvent) {
   if (!props.cropBox) return;
+  if (e.target !== e.currentTarget) return;
   keyboardMode.value = 'box';
   keyboardHandle.value = '';
 }
