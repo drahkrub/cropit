@@ -104,8 +104,8 @@ type KeyboardMode = 'none' | 'box' | 'handle';
 const keyboardMode = ref<KeyboardMode>('none');
 const keyboardHandle = ref<string>('');
 
-const STEP_NORMAL = 1;  // px
-const STEP_SHIFT = 10;  // px
+const STEP_NORMAL = 1; // px
+const STEP_SHIFT = 10; // px
 
 // ---------------------------------------------------------------------------
 // Handles
