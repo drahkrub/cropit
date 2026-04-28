@@ -7,7 +7,7 @@
       'crop-preview--kb-box': keyboardMode === 'box',
     }"
     tabindex="0"
-    :aria-label="`Page preview. ${ariaStatusText}`"
+    aria-label="Page preview crop editor"
     @mousedown.prevent="onMouseDown"
     @click="onContainerClick"
     @keydown="onKeyDown"
@@ -50,6 +50,7 @@
           v-for="h in HANDLES"
           :key="h.name"
           role="button"
+          tabindex="0"
           :aria-label="`${h.label} resize handle`"
           :class="[
             'crop-handle',

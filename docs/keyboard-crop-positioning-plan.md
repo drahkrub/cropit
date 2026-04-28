@@ -256,7 +256,7 @@ The same rules that govern mouse resizing apply. In addition:
     'crop-preview--kb-box': keyboardMode === 'box',
   }"
   tabindex="0"
-  :aria-label="`Page preview. ${ariaStatus}`"
+  aria-label="Page preview crop editor"
   @mousedown.prevent="onMouseDown"
   @keydown="onKeyDown"
   @click="onContainerClick"
@@ -276,6 +276,7 @@ The same rules that govern mouse resizing apply. In addition:
       v-for="h in HANDLES"
       :key="h.name"
       role="button"
+      tabindex="0"
       :aria-label="`${h.label} resize handle`"
       :class="[
         'crop-handle',
@@ -289,7 +290,7 @@ The same rules that govern mouse resizing apply. In addition:
 
   <!-- Accessible live region -->
   <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
-    {{ ariaStatus }}
+    {{ ariaStatusText }}
   </div>
 </template>
 ```
@@ -404,7 +405,7 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 // --- Aria status ---
-const ariaStatus = computed(() => {
+const ariaStatusText = computed(() => {
   if (!props.cropBox) return 'No crop box defined.';
   if (keyboardMode.value === 'none') return 'Crop box present. Click to select.';
   if (keyboardMode.value === 'box')  return 'Crop box selected. Use arrow keys to move.';
