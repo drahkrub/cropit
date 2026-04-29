@@ -4,7 +4,7 @@
     class="crop-preview"
     tabindex="-1"
     aria-label="Page preview crop editor"
-    @mousedown.prevent="onMouseDown"
+    @pointerdown="onPointerDown"
     @click="onContainerClick"
     @keydown="onKeyDown"
     @blur="onContainerBlur"
@@ -50,7 +50,7 @@
             `crop-handle--${h.name}`,
             { 'crop-handle--kb-active': keyboardMode === 'handle' && keyboardHandle === h.name },
           ]"
-          @mousedown.stop.prevent="startResize(h.name, $event)"
+          @pointerdown.stop="startResize(h.name, $event)"
           @click.stop="onHandleClick(h.name)"
         />
       </div>
@@ -101,6 +101,7 @@ const mode = ref<DragMode>('idle');
 const dragStart = ref({ x: 0, y: 0 });
 const dragStartBox = ref<CropBox | null>(null);
 const activeHandle = ref<ResizeHandle | ''>('');
+let activePointerId: number | null = null;
 
 // ---------------------------------------------------------------------------
 // Keyboard selection state
@@ -142,9 +143,9 @@ function onImageError() {
 }
 
 // ---------------------------------------------------------------------------
-// Mouse helpers
+// Pointer helpers
 // ---------------------------------------------------------------------------
-function getRelativePos(e: MouseEvent): { x: number; y: number } {
+function getRelativePos(e: PointerEvent): { x: number; y: number } {
   const rect = containerRef.value!.getBoundingClientRect();
   return {
     x: Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1),
@@ -153,22 +154,66 @@ function getRelativePos(e: MouseEvent): { x: number; y: number } {
 }
 
 // ---------------------------------------------------------------------------
-// Mouse events
+// Pointer events
 // ---------------------------------------------------------------------------
-function addDocumentListeners() {
-  document.addEventListener('mousemove', onMouseMove);
-  document.addEventListener('mouseup', onMouseUp);
+function addPointerListeners() {
+  document.addEventListener('pointermove', onPointerMove);
+  document.addEventListener('pointerup', onPointerUp);
+  document.addEventListener('pointercancel', onPointerCancel);
 }
 
-function removeDocumentListeners() {
-  document.removeEventListener('mousemove', onMouseMove);
-  document.removeEventListener('mouseup', onMouseUp);
+function removePointerListeners() {
+  document.removeEventListener('pointermove', onPointerMove);
+  document.removeEventListener('pointerup', onPointerUp);
+  document.removeEventListener('pointercancel', onPointerCancel);
+}
+
+function captureActivePointer(pointerId: number) {
+  const container = containerRef.value;
+  if (!container) return;
+
+  try {
+    container.setPointerCapture(pointerId);
+  } catch {
+    // Pointer capture can fail for unsupported or already-finished pointers.
+  }
+}
+
+function releaseActivePointer(pointerId: number | null) {
+  const container = containerRef.value;
+  if (!container || pointerId === null) return;
+
+  if (container.hasPointerCapture(pointerId)) {
+    container.releasePointerCapture(pointerId);
+  }
+}
+
+function isPrimaryActivation(e: PointerEvent): boolean {
+  return e.isPrimary && e.button === 0;
+}
+
+function startInteraction(
+  modeValue: DragMode,
+  pointerId: number,
+  pos: { x: number; y: number },
+  box: CropBox,
+  handle: ResizeHandle | '' = '',
+) {
+  mode.value = modeValue;
+  activePointerId = pointerId;
+  activeHandle.value = handle;
+  dragStart.value = pos;
+  dragStartBox.value = { ...box };
+  addPointerListeners();
+  captureActivePointer(pointerId);
 }
 
 onUnmounted(stopDrag);
 
-function onMouseDown(e: MouseEvent) {
+function onPointerDown(e: PointerEvent) {
+  if (!isPrimaryActivation(e) || mode.value !== 'idle') return;
   if (!imageLoaded.value || imageError.value || !props.cropBox) return;
+
   const pos = getRelativePos(e);
 
   // If clicking inside the existing crop rect → start moving
@@ -180,15 +225,13 @@ function onMouseDown(e: MouseEvent) {
     pos.y >= b.y + pad &&
     pos.y <= b.y + b.h - pad
   ) {
-    mode.value = 'moving';
-    dragStart.value = pos;
-    dragStartBox.value = { ...b };
-    addDocumentListeners();
+    e.preventDefault();
+    startInteraction('moving', e.pointerId, pos, b);
   }
 }
 
-function onMouseMove(e: MouseEvent) {
-  if (mode.value === 'idle') return;
+function onPointerMove(e: PointerEvent) {
+  if (mode.value === 'idle' || activePointerId !== e.pointerId) return;
   const pos = getRelativePos(e);
 
   if (mode.value === 'moving' && dragStartBox.value) {
@@ -210,22 +253,31 @@ function onMouseMove(e: MouseEvent) {
 }
 
 function stopDrag() {
+  const pointerId = activePointerId;
   mode.value = 'idle';
   dragStartBox.value = null;
-  removeDocumentListeners();
+  activeHandle.value = '';
+  activePointerId = null;
+  removePointerListeners();
+  releaseActivePointer(pointerId);
 }
 
-function onMouseUp() {
+function onPointerUp(e: PointerEvent) {
+  if (activePointerId !== e.pointerId) return;
   stopDrag();
 }
 
-function startResize(handle: ResizeHandle, e: MouseEvent) {
+function onPointerCancel(e: PointerEvent) {
+  if (activePointerId !== e.pointerId) return;
+  stopDrag();
+}
+
+function startResize(handle: ResizeHandle, e: PointerEvent) {
+  if (!isPrimaryActivation(e) || mode.value !== 'idle') return;
   if (!props.cropBox) return;
-  mode.value = 'resizing';
-  activeHandle.value = handle;
-  dragStart.value = getRelativePos(e);
-  dragStartBox.value = { ...props.cropBox };
-  addDocumentListeners();
+
+  e.preventDefault();
+  startInteraction('resizing', e.pointerId, getRelativePos(e), props.cropBox, handle);
 }
 
 // ---------------------------------------------------------------------------
@@ -403,6 +455,7 @@ const overlayRightStyle = computed(() => {
   border: 2px solid #ffcc00;
   box-sizing: border-box;
   cursor: move;
+  touch-action: none;
 
   &--kb-selected {
     border-color: #ffffff;
@@ -420,6 +473,7 @@ $handle-size: 10px;
   background: #ffcc00;
   border: 1px solid #333;
   box-sizing: border-box;
+  touch-action: none;
 
   &--nw { top: -5px;  left: -5px;  cursor: nw-resize; }
   &--n  { top: -5px;  left: calc(50% - 5px); cursor: n-resize; }
