@@ -68,6 +68,12 @@
 <script setup lang="ts">
 import { ref, computed, onUnmounted } from 'vue';
 import type { CropBox } from 'components/models';
+import {
+  getMoveCapturePadding,
+  moveCropBox,
+  resizeCropBox,
+} from '../utils/cropBoxGeometry';
+import type { ResizeHandle } from '../utils/cropBoxGeometry';
 
 // ---------------------------------------------------------------------------
 // Props / emits
@@ -94,14 +100,14 @@ type DragMode = 'idle' | 'moving' | 'resizing';
 const mode = ref<DragMode>('idle');
 const dragStart = ref({ x: 0, y: 0 });
 const dragStartBox = ref<CropBox | null>(null);
-const activeHandle = ref('');
+const activeHandle = ref<ResizeHandle | ''>('');
 
 // ---------------------------------------------------------------------------
 // Keyboard selection state
 // ---------------------------------------------------------------------------
 type KeyboardMode = 'none' | 'box' | 'handle';
 const keyboardMode = ref<KeyboardMode>('none');
-const keyboardHandle = ref<string>('');
+const keyboardHandle = ref<ResizeHandle | ''>('');
 
 const STEP_NORMAL = 1; // px
 const STEP_SHIFT = 10; // px
@@ -109,7 +115,7 @@ const STEP_SHIFT = 10; // px
 // ---------------------------------------------------------------------------
 // Handles
 // ---------------------------------------------------------------------------
-const HANDLES = [
+const HANDLES: ReadonlyArray<{ name: ResizeHandle; label: string }> = [
   { name: 'nw', label: 'Northwest' },
   { name: 'n', label: 'North' },
   { name: 'ne', label: 'Northeast' },
@@ -146,10 +152,6 @@ function getRelativePos(e: MouseEvent): { x: number; y: number } {
   };
 }
 
-function clamp(v: number, lo = 0, hi = 1) {
-  return Math.min(Math.max(v, lo), hi);
-}
-
 // ---------------------------------------------------------------------------
 // Mouse events
 // ---------------------------------------------------------------------------
@@ -171,7 +173,7 @@ function onMouseDown(e: MouseEvent) {
 
   // If clicking inside the existing crop rect → start moving
   const b = props.cropBox;
-  const pad = 0.015; // inner dead-zone (avoids accidental move near edges)
+  const pad = getMoveCapturePadding(b);
   if (
     pos.x >= b.x + pad &&
     pos.x <= b.x + b.w - pad &&
@@ -193,49 +195,17 @@ function onMouseMove(e: MouseEvent) {
     const b = dragStartBox.value;
     const dx = pos.x - dragStart.value.x;
     const dy = pos.y - dragStart.value.y;
-    emit('update:cropBox', {
-      x: clamp(b.x + dx, 0, 1 - b.w),
-      y: clamp(b.y + dy, 0, 1 - b.h),
-      w: b.w,
-      h: b.h,
-    });
+    emit('update:cropBox', moveCropBox(b, dx, dy));
     return;
   }
 
   if (mode.value === 'resizing' && dragStartBox.value) {
     const b = dragStartBox.value;
-    let { x, y, w, h } = b;
     const dx = pos.x - dragStart.value.x;
     const dy = pos.y - dragStart.value.y;
-    const handle = activeHandle.value;
-    const MIN = 0.02;
+    if (!activeHandle.value) return;
 
-    if (handle.includes('n')) {
-      const newY = b.y + dy;
-      const newH = b.h - dy;
-      if (newH >= MIN) { y = newY; h = newH; }
-    }
-    if (handle.includes('s')) {
-      const newH = b.h + dy;
-      if (newH >= MIN) h = newH;
-    }
-    if (handle.includes('w')) {
-      const newX = b.x + dx;
-      const newW = b.w - dx;
-      if (newW >= MIN) { x = newX; w = newW; }
-    }
-    if (handle.includes('e')) {
-      const newW = b.w + dx;
-      if (newW >= MIN) w = newW;
-    }
-
-    // Clamp to container bounds
-    x = clamp(x, 0, 1 - MIN);
-    y = clamp(y, 0, 1 - MIN);
-    w = clamp(w, MIN, 1 - x);
-    h = clamp(h, MIN, 1 - y);
-
-    emit('update:cropBox', { x, y, w, h });
+    emit('update:cropBox', resizeCropBox(b, activeHandle.value, dx, dy));
   }
 }
 
@@ -249,7 +219,7 @@ function onMouseUp() {
   stopDrag();
 }
 
-function startResize(handle: string, e: MouseEvent) {
+function startResize(handle: ResizeHandle, e: MouseEvent) {
   if (!props.cropBox) return;
   mode.value = 'resizing';
   activeHandle.value = handle;
@@ -268,7 +238,7 @@ function onBoxClick() {
   containerRef.value?.focus();
 }
 
-function onHandleClick(handle: string) {
+function onHandleClick(handle: ResizeHandle) {
   if (!props.cropBox) return;
   keyboardMode.value = 'handle';
   keyboardHandle.value = handle;
@@ -308,52 +278,23 @@ function onKeyDown(e: KeyboardEvent) {
   const stepPx = e.shiftKey ? STEP_SHIFT : STEP_NORMAL;
   const dx = stepPx / rect.width;
   const dy = stepPx / rect.height;
-  const MIN = 0.02;
-
-  let { x, y, w, h } = props.cropBox;
 
   if (keyboardMode.value === 'box') {
-    if (e.key === 'ArrowLeft')  x = clamp(x - dx, 0, 1 - w);
-    if (e.key === 'ArrowRight') x = clamp(x + dx, 0, 1 - w);
-    if (e.key === 'ArrowUp')    y = clamp(y - dy, 0, 1 - h);
-    if (e.key === 'ArrowDown')  y = clamp(y + dy, 0, 1 - h);
+    const moveDx = e.key === 'ArrowLeft' ? -dx : e.key === 'ArrowRight' ? dx : 0;
+    const moveDy = e.key === 'ArrowUp' ? -dy : e.key === 'ArrowDown' ? dy : 0;
+    emit('update:cropBox', moveCropBox(props.cropBox, moveDx, moveDy));
   } else {
     const handle = keyboardHandle.value;
+    if (!handle) return;
     const isLeft  = e.key === 'ArrowLeft';
     const isRight = e.key === 'ArrowRight';
     const isUp    = e.key === 'ArrowUp';
     const isDown  = e.key === 'ArrowDown';
+    const resizeDx = isLeft ? -dx : isRight ? dx : 0;
+    const resizeDy = isUp ? -dy : isDown ? dy : 0;
 
-    if (handle.includes('w') && (isLeft || isRight)) {
-      const sign = isLeft ? -1 : 1;
-      const newX = x + sign * dx;
-      const newW = w - sign * dx;
-      if (newW >= MIN) { x = newX; w = newW; }
-    }
-    if (handle.includes('e') && (isLeft || isRight)) {
-      const sign = isLeft ? -1 : 1;
-      const newW = w + sign * dx;
-      if (newW >= MIN) w = newW;
-    }
-    if (handle.includes('n') && (isUp || isDown)) {
-      const sign = isUp ? -1 : 1;
-      const newY = y + sign * dy;
-      const newH = h - sign * dy;
-      if (newH >= MIN) { y = newY; h = newH; }
-    }
-    if (handle.includes('s') && (isUp || isDown)) {
-      const sign = isUp ? -1 : 1;
-      const newH = h + sign * dy;
-      if (newH >= MIN) h = newH;
-    }
-
-    x = clamp(x, 0, 1 - MIN);
-    y = clamp(y, 0, 1 - MIN);
-    w = clamp(w, MIN, 1 - x);
-    h = clamp(h, MIN, 1 - y);
+    emit('update:cropBox', resizeCropBox(props.cropBox, handle, resizeDx, resizeDy));
   }
-
-  emit('update:cropBox', { x, y, w, h });
 }
 
 // ---------------------------------------------------------------------------
