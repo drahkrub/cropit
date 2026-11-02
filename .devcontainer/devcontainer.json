@@ -1,58 +1,459 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/java
+// ============================================================================
+//  DEVCONTAINER-VORLAGE -- Java 25 + Maven + Node/pnpm + Claude Code (CLI)
+// ============================================================================
+//
+//  Projektname dieses Devcontainers:  cropit
+//
+//  1. PROJEKTNAMEN EINTRAGEN -- VOR DEM ERSTEN START
+//
+//     Steht in der Zeile darueber noch PROJEKTNAME in spitzen Klammern, ist
+//     die Vorlage frisch kopiert. Dann JEDES Vorkommen in dieser Datei
+//     ersetzen, durch einen Namen, den auf diesem Rechner noch kein anderer
+//     Devcontainer benutzt, z.B. "regal_backend". Erlaubt sind Buchstaben,
+//     Ziffern, "_", "." und "-".
+//
+//       macOS/Linux, im Ordner, der .devcontainer/ enthaelt:
+//         sed -i.bak 's/<PROJEKT[N]AME>/regal_backend/g' .devcontainer/devcontainer.json
+//         rm .devcontainer/devcontainer.json.bak
+//
+//       Windows oder ohne Konsole: im Editor "Suchen und Ersetzen",
+//       "Alle ersetzen".
+//
+//     Das "[N]" im sed-Befehl ist Absicht: so passt das Muster nicht auf
+//     diese Anleitung selbst, und sie bleibt nach dem Ersetzen lesbar.
+//
+//     Wozu der Name: er macht Container und Volumes eindeutig. Docker-Namen
+//     gelten fuer den ganzen Rechner; zwei Devcontainer mit demselben Namen
+//     teilten sich still Anmeldung, Verlauf, erteilte Permissions und
+//     node_modules. Bewusst NICHT der Ordnername
+//     (${localWorkspaceFolderBasename}) -- Ordner heissen nun mal "frontend",
+//     "app" oder "backend".
+//
+//     Vergessen? Dann bricht der Start ab, bevor ein Container entsteht:
+//     Docker lehnt spitze Klammern in Container- und Volume-Namen ab
+//     ("Invalid container name ..." bzw. "... includes invalid characters
+//     for a local volume name"). Genau dafuer stehen die Klammern im
+//     Platzhalter -- ein schlichtes PROJEKTNAME waere ein gueltiger Name und
+//     liefe still durch. Der Abbruch kommt allerdings erst nach dem
+//     Image-Build; der liegt danach im Cache, der zweite Anlauf geht schneller.
+//
+//  2. STARTEN
+//
+//     Ohne IDE, im Ordner, der .devcontainer/ enthaelt:
+//       devcontainer up --workspace-folder .
+//       devcontainer exec --workspace-folder . bash
+//     oder, sobald der Container laeuft, ohne devcontainer-CLI:
+//       docker exec -it -u node -w /workspaces/cropit claude-cropit bash
+//     und in dieser bash "claude" starten.
+//
+//     Bei docker exec ist "-u node" Pflicht. Ohne laeuft alles als root (so
+//     startet der Container), und Claude Code legte root-eigene Dateien ins
+//     Volume ~/.claude, die es als node danach nicht mehr schreiben kann.
+//     "devcontainer exec" nimmt den remoteUser von selbst.
+//
+//     Root fuer Eingriffe am Container (apt-get, Firewall): sudo darf "node"
+//     nur noch fuer die Firewall (Ende von postCreate.sh). Root-Shell vom Host:
+//       docker exec -it -u root claude-cropit bash
+//     Dort nichts unter /home/node/.claude anlegen, es gehoerte dann root.
+//     Mit IDE (VS Code, JetBrains Gateway): diesen Ordner oeffnen, dann
+//     "Reopen in Container" bzw. das Gegenstueck der IDE.
+//
+//     Beim ersten Start:
+//       - einmal "claude" aufrufen und dem Anmelde-Link folgen
+//         (siehe ~/.claude unter "mounts"),
+//       - fuer Codex einmal "codex login --device-auth" (siehe ~/.codex
+//         unter "mounts"),
+//       - bei einem Node-Projekt die Abhaengigkeiten IM CONTAINER
+//         installieren, z.B. "pnpm install" (siehe node_modules unter "mounts").
+//       - persoenliche Einstellungen (git-Identitaet, Aliase) einmal anlegen,
+//         sonst scheitert der erste Commit an der fehlenden Identitaet:
+//           cp .devcontainer/personal.sh.example ~/.claude/personal.sh
+//         anpassen, dann "bash .devcontainer/setup-home.sh". Die Datei liegt
+//         im Home-Volume und bleibt ueber Rebuilds erhalten.
+//
+//  3. WIEDER ENTFERNEN
+//
+//       docker rm -f claude-cropit
+//       docker volume rm claude-cropit-home claude-cropit-m2 claude-cropit-cache claude-cropit-codex claude-cropit-node-modules
+//
+//  Die Begruendungen stehen jeweils an der Stelle, die sie betreffen.
+// ============================================================================
 {
-  "name": "Java & Node",
-  // Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-  "image": "mcr.microsoft.com/devcontainers/java:3-25-trixie",
+  "name": "Java 25 + Maven + Node/pnpm + Claude Code",
+
+  // Schlankes, generisches Ubuntu-Basisimage. Der Container funktioniert
+  // identisch, egal ob er mit VS Code, JetBrains Gateway, der devcontainer-CLI
+  // oder per "docker exec" geoeffnet wird; nichts davon haengt an einer IDE.
+  // Die "customizations" am Ende sind nur ein Zusatz fuer VS Code.
+  //
+  // Warum base + Features und nicht "devcontainers/java:25-trixie" oder
+  // "devcontainers/typescript-node"? Beide Toolchains (JDK und Node) sind hier
+  // gleichrangig. Ein vorgebautes Sprach-Image backt genau eine davon in den
+  // Image-Tag ein und laesst die andere trotzdem als Feature uebrig -- die
+  // Versionen stuenden dann an zwei verschiedenen Stellen. So stehen beide
+  // versioniert in dieser Datei und gepinnt in devcontainer-lock.json.
+  // Preis: der erste Build dauert laenger, weil die Features zur Buildzeit
+  // installiert werden statt fertig im Image zu liegen.
+  //
+  // Statt "image" ein Dockerfile daneben: es setzt auf genau dieses Basisimage
+  // auf und benennt nur den mitgelieferten Benutzer "vscode" in "node" um,
+  // damit der Home-Pfad /home/node ist wie in den Node-Images der
+  // Devcontainer-Familie. Ein eigener Build entsteht durch die Features
+  // ohnehin, der Schritt kostet also nichts. Begruendung im Dockerfile.
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
 
   "features": {
+    // https://github.com/devcontainers/features/tree/main/src/java
     "ghcr.io/devcontainers/features/java:1": {
-      "version": "none",
-      "installMaven": "true",
-      "installGradle": "false"
+      "version": "25.0.3-tem",
+      "jdkDistro": "tem",
+      "installMaven": true,
+      "installGradle": false
     },
+
+    // https://github.com/devcontainers/features/tree/main/src/node
+    // Das Feature heisst offiziell "Node.js (via nvm), yarn and pnpm" -- es
+    // installiert nvm nach /usr/local/share/nvm und setzt PATH/NVM_DIR per
+    // containerEnv. Damit ist "nvm use", "nvm install <x>" im Container
+    // verfuegbar und pnpm kommt gleich mit.
+    //
+    // Version bewusst exakt gepinnt. Hat das Projekt eine .nvmrc, dieselbe
+    // Version dort eintragen, damit Host (nvm use) und Container dieselbe
+    // Node-Version fahren -- das Feature liest .nvmrc nicht.
+    //
+    // pnpm und yarn stehen beide bereit, die Vorlage legt sich nicht fest.
+    // yarn kommt ueber Corepack (installYarnUsingApt=false) statt aus dem
+    // Yarn-apt-Repo -- das spart eine Fremd-Paketquelle samt GPG-Schluessel und
+    // einen weiteren Eintrag in der Firewall-Allowlist, denn Corepack laedt
+    // yarn ueber registry.npmjs.org, die ohnehin freigegeben ist. Corepack
+    // richtet sich nach dem Feld "packageManager" der jeweiligen package.json;
+    // fehlt es, greift yarn 1.x (Classic).
     "ghcr.io/devcontainers/features/node:1": {
-      "version": "24"
+      "version": "24.20.0",
+      "pnpmVersion": "12.11.2",
+      "installYarnUsingApt": false
     }
   },
 
+  // Alles hier ist containerEnv, nicht remoteEnv: nur so sieht auch ein
+  // "docker exec ... claude" die Variablen.
+  "containerEnv": {
+    "EDITOR": "vim",
+
+    // Hebt die Heap-Grenze von Node fest auf 4 GB. Ohne die Angabe bemisst
+    // Node sie selbst, und speicherhungrige Laeufe wie vue-tsc oder ein
+    // Produktions-Build brechen bei groesseren Projekten mit "JavaScript heap
+    // out of memory" ab.
+    "NODE_OPTIONS": "--max-old-space-size=4096",
+
+    // yarn 1 (Classic) fragt in einem Terminal einmal am Tag
+    // classic.yarnpkg.com (Netlify), ob es eine neuere yarn-Version gibt. Der
+    // Host steht nicht in allowed-domains.txt, die Anfrage laeuft also in die
+    // Firewall: "There appears to be trouble with your network connection.
+    // Retrying..." -- und yarn beendet sich erst nach Minuten, obwohl die
+    // Installation laengst fertig ist. Am 2026-10-05 nachgestellt: ohne die
+    // Variable haengt "yarn install" im Terminal bis zum Timeout, mit ihr ist
+    // es sofort fertig. Ohne Terminal (Pipe, Maven-Build) prueft yarn nie.
+    // Updates kommen ohnehin ueber Corepack, die Pruefung hat hier keinen Nutzen.
+    "YARN_DISABLE_SELF_UPDATE_CHECK": "true",
+
+    // Shell fuer das Bash-Werkzeug von Claude Code. Ohne diese Variable waehlt
+    // Claude Code selbst: "docker exec" setzt kein SHELL, und auch eine damit
+    // gestartete bash exportiert keins (2026-10-05 in der Umgebung von claude
+    // nachgesehen). Dann nimmt es die zsh, die das Basisimage samt oh-my-zsh
+    // mitbringt -- nicht die bash aus /etc/passwd. In der zsh verhalten sich Skriptzeilen anders
+    // (Arrays ab 1, kein Wort-Splitting von $VAR, Abbruch bei leerem Glob).
+    // Terminals im Container betrifft die Variable nicht.
+    "CLAUDE_CODE_SHELL": "/bin/bash",
+
+    // Ohne diese Variable legt Claude Code seine .claude.json (Projektliste,
+    // Onboarding, oauthAccount, MCP-Server in local scope) nach
+    // ~/.claude.json -- AUSSERHALB des Volumes ~/.claude, also nach jedem
+    // Rebuild weg. Mit ihr liegt die Datei im Volume, neben der
+    // .credentials.json. Anthropics Referenz-Devcontainer
+    // (github.com/anthropics/claude-code, .devcontainer/) macht es genauso.
+    //
+    // Am 2026-10-05 mit Claude Code 2.1.251 nachgeprueft: mit gesetzter
+    // Variable entsteht $CLAUDE_CONFIG_DIR/.claude.json und im Home nichts;
+    // eine vorhandene ~/.claude.json wird dann gar nicht mehr gelesen.
+    //
+    // Ersetzt den frueheren Bind einer Host-Datei ~/.claude-<projekt>.json
+    // auf ~/.claude.json. Der brauchte ein initializeCommand, das die Datei
+    // auf dem Host vorab anlegt (sonst macht Docker ein Verzeichnis daraus),
+    // und das lief nur in einer POSIX-Shell -- auf Windows-Hosts also nicht.
+    // Ausserdem scheitert rename ueber einen Einzeldatei-Mountpoint mit EBUSY,
+    // Claude Code schrieb die Datei dort deshalb nicht atomar.
+    "CLAUDE_CONFIG_DIR": "/home/node/.claude",
+
+    // pnpm-Store INS node_modules-Volume (siehe "mounts"). Hardlinks gehen
+    // nur innerhalb eines Mounts -- ueber Mount-Grenzen scheitern sie mit
+    // EXDEV, selbst auf derselben Partition --, und pnpm faellt dann still
+    // auf Kopieren zurueck: langsamer, doppelter Plattenverbrauch. Ohne die
+    // Variable landete der Store ausserdem an der Wurzel des Bind-Mounts,
+    // also im Projektordner des HOSTS (in einem anderen Devcontainer so
+    // beobachtet).
+    //
+    // Am 2026-10-05 mit pnpm 11.7.0 geprueft: wirksam ist pnpm_config_*,
+    // NICHT npm_config_* (das ignoriert pnpm 11), und die Variable schlaegt
+    // ein storeDir in der pnpm-workspace.yaml des Projekts. Das Projekt muss
+    // also nichts dafuer tun. Fuer npm und yarn ist sie bedeutungslos -- das
+    // Frontend dieses Repos baut derzeit mit yarn, die Variable ist also
+    // Vorsorge fuer pnpm.
+    "pnpm_config_store_dir": "${containerWorkspaceFolder}/src/main/frontend/node_modules/.pnpm-store"
+  },
+
+  "runArgs": [
+    // Projektname: siehe Kopf dieser Datei.
+    "--name=claude-cropit",
+
+    // Ablage fuer Variablen, die ALLE Devcontainer dieses Rechners teilen
+    // sollen und die nicht ins Repo gehoeren. Der Mechanismus ist sinnvoll --
+    // --env-file liest Docker selbst, unabhaengig davon, welches Werkzeug den
+    // Container startet, und ${localEnv:...} greift auf das Home des Hosts zu.
+    //
+    // Nur: gebraucht wird derzeit nichts daraus. Am 2026-08-23 in einem
+    // Devcontainer mit derselben Zeile nachgesehen -- in der Umgebung von
+    // PID 1 stammte jede Variable aus "containerEnv" oder aus dem Image, aus
+    // der Datei keine einzige. Auch Claude Code braucht hier nichts, die
+    // Anmeldung laeuft ueber OAuth (siehe "mounts").
+    //
+    // Deshalb auskommentiert: fehlt die Datei auf dem Host, bricht schon
+    // "docker run" ab -- fuer eine Vorlage, die weitergegeben wird, ein
+    // Fehlermodus ohne Gegenwert. Werden gemeinsame Variablen gebraucht:
+    // Datei anlegen, Zeile aktivieren, Rebuild.
+    // "--env-file=${localEnv:HOME}/.config/dev-containers.env",
+
+    // NET_ADMIN/NET_RAW: noetig, damit init-firewall.sh iptables-Regeln und
+    // ipsets anlegen darf. Ohne diese beiden Capabilities scheitert das
+    // Firewall-Skript beim ersten iptables-Aufruf.
+    "--cap-add=NET_ADMIN",
+    "--cap-add=NET_RAW",
+
+    // Ruestet den Namen host.docker.internal unter Linux nach, wo Docker ihn
+    // nicht von sich aus setzt (auf Docker Desktop existiert er ohnehin, die
+    // Zeile stoert dort nicht). Damit erreicht der Container Dienste, die auf
+    // dem HOST laufen -- z.B. eine Datenbank oder ein Backend-Prozess.
+    // Bewusst NICHT die Gateway-IP hartkodiert: 172.17.0.1 gilt nur fuer
+    // Dockers Default-Bridge auf einem Linux-Host.
+    "--add-host=host.docker.internal:host-gateway"
+  ],
+
+  // Den Projektordner selbst haengt die CLI bzw. IDE ein, ohne Angabe hier:
+  // Liegt .devcontainer/ tief in einem Git-Repo, haengt sie trotzdem die
+  // Repo-WURZEL ein (unter /workspaces/<repo>) und setzt
+  // ${containerWorkspaceFolder} auf den Ordner, der .devcontainer/ enthaelt.
+  // So funktioniert git im Container, egal wie tief die Vorlage liegt.
+  //
+  // Ausnahme: das Repo ist ein Worktree ("git worktree add"). Dessen .git ist
+  // eine Datei, die auf das Haupt-Repo AUSSERHALB des Mounts zeigt -- im
+  // Container meldet git dann "fatal: not a git repository: (null)" (am
+  // 2026-10-05 angetroffen). Abhilfe, in devcontainer-CLI 0.89.0 nachgelesen
+  // und nachgestellt:
+  //
+  //   git worktree add --relative-paths <pfad> <branch>
+  //   devcontainer up --workspace-folder . --mount-git-worktree-common-dir \
+  //                   --remove-existing-container
+  //
+  // Das Flag haengt zusaetzlich das .git des Haupt-Repos an die passende
+  // relative Stelle unter /workspaces. Dabei drei Fallen, alle mit derselben
+  // Fehlermeldung:
+  //   - Nur mit RELATIVEM gitdir ("gitdir: ../..."). Bei absolutem ignoriert
+  //     die CLI das Flag stillschweigend. --relative-paths braucht git >= 2.48
+  //     auf dem Host -- und im Container, weil es die Repo-Erweiterung
+  //     relativeWorktrees setzt.
+  //   - Wirkt nur beim ANLEGEN des Containers. Findet "devcontainer up" einen
+  //     vorhandenen Container fuer denselben Ordner, startet es ihn bloss,
+  //     ohne neue Mounts -- daher --remove-existing-container. Und bei jedem
+  //     spaeteren Neuanlegen wieder mitgeben: in dieser Datei laesst es sich
+  //     nicht festschreiben, es ist eine reine CLI-Option (ab CLI 0.81.0).
+  //   - Pruefen im Container: grep '\.git' /proc/self/mountinfo muss das .git
+  //     des Haupt-Repos zeigen.
+  //
+  // Preis: der Container darf dann auch ins .git des Haupt-Repos schreiben,
+  // samt hooks/ und config, die fuer ALLE Worktrees gelten -- und Hooks laufen
+  // beim naechsten git-Befehl auf dem Host.
+  "mounts": [
+    // ANMELDUNG UND ZUSTAND VON CLAUDE CODE
+    //
+    // Kein API-Schluessel und kein Bearer-Token im Repo: Claude Code meldet
+    // sich per OAuth an (beim ersten "claude" im Container erscheint ein Link,
+    // der im Browser des Hosts geoeffnet wird). Das Ergebnis liegt in
+    // ~/.claude/.credentials.json, dank CLAUDE_CONFIG_DIR (siehe containerEnv)
+    // daneben auch die .claude.json. Beides ueberlebt Rebuilds nur, weil
+    // dieses Verzeichnis ein Volume ist.
+    //
+    // Zweiter Anthropic-Zugang? Den Anmelde-Link in einem privaten
+    // Browserfenster oeffnen, sonst tauscht er die claude.ai-Sitzung des
+    // Hosts aus.
+    //
+    // Das Volume ist bewusst PROJEKTEIGEN: eigene Anmeldung, eigener Verlauf,
+    // eigene erteilte Permissions, abgekapselt von der uebrigen KI-Nutzung
+    // des Rechners. Preis: in jedem Devcontainer einmal separat einloggen.
+    //
+    // NICHT mit einem anderen Container teilen. Es gibt nur eine
+    // .credentials.json, die Anmeldung mit einem anderen Konto wirft die
+    // bisherige also ueberall heraus. Und Claude Code schreibt die
+    // .claude.json ohne Sperre als Ganzes zurueck: zwei Container daran
+    // verlieren Aenderungen (am 2026-08-23 gemessen, zwei parallele Schreiber
+    // mit je 6 Eintraegen ergaben 9 statt 12).
+    //
+    // Zuruecksetzen (danach neu anmelden):
+    //   docker volume rm claude-cropit-home
+    "source=claude-cropit-home,target=/home/node/.claude,type=volume",
+
+    // Maven-Repository als eigenes Volume. Ohne das laedt jeder Rebuild den
+    // kompletten Abhaengigkeitsbaum neu. Anders als node_modules ist ~/.m2
+    // plattformunabhaengig (reine JARs), ein simples Volume genuegt also.
+    //
+    // Zuruecksetzen: docker volume rm claude-cropit-m2
+    "source=claude-cropit-m2,target=/home/node/.m2,type=volume",
+
+    // ~/.cache als eigenes Volume: der Headless-Chromium fuer die
+    // UI-Selbsttests liegt darin (~/.cache/ms-playwright, 656 MB) und wuerde
+    // sonst bei jedem Rebuild neu geladen. Dazu kommen pnpm- und
+    // TypeScript-Caches.
+    //
+    // Bewusst NUR .cache und nicht das ganze Home: Home mischt drei Schichten
+    // (Image-Skelett, Feature-Installation zur Buildzeit, Laufzeit-Zustand),
+    // und ein Volume darueber friert die ersten beiden beim Anlegen ein.
+    // Der erste Start saehe normal aus, ab dem zweiten Build gewinnt dann das
+    // Volume und ueberdeckt jede Aenderung an Image oder Features -- lautlos.
+    // .cache ist die einzige Schicht ohne Buildzeit-Inhalt, also gefahrlos zu
+    // persistieren und gefahrlos zu loeschen.
+    //
+    // Die Systembibliotheken, die "playwright install-deps" per apt zieht,
+    // liegen NICHT hier und muessen weiter bei jedem Rebuild installiert
+    // werden. Das ist der schnelle Teil.
+    //
+    // Zuruecksetzen: docker volume rm claude-cropit-cache
+    "source=claude-cropit-cache,target=/home/node/.cache,type=volume",
+
+    // ANMELDUNG UND ZUSTAND VON CODEX (OpenAI), neben Claude Code
+    //
+    // Codex legt Anmeldung (auth.json), config.toml und Verlauf nach
+    // ~/.codex (CODEX_HOME, Standardwert). Ohne Volume waere das nach jedem
+    // Rebuild weg. Bewusst ein EIGENES Volume und nicht ein Unterordner von
+    // ~/.claude: zwei Werkzeuge, zwei Anbieter, getrennt zuruecksetzbar.
+    // Projekteigen aus denselben Gruenden wie ~/.claude.
+    //
+    // Anmeldung mit "codex login --device-auth": Code im Browser des Hosts
+    // eingeben. Das schlichte "codex login" wartet auf einen Rueckruf an
+    // localhost:1455 im Container, der kommt nur mit Port-Weiterleitung an
+    // (VS Code macht sie von selbst).
+    //
+    // Codex installiert postCreate.sh per npm. Seine Hosts stehen in
+    // allowed-domains.txt. Ob seine eigene Sandbox (bubblewrap) im Container
+    // laeuft, ist nicht geprueft. Scheitert sie, "--sandbox
+    // danger-full-access", die Grenze zieht dann die Firewall.
+    //
+    // Zuruecksetzen (danach neu anmelden):
+    //   docker volume rm claude-cropit-codex
+    "source=claude-cropit-codex,target=/home/node/.codex,type=volume",
+
+    // NODE_MODULES als eigenes Volume, NICHT ueber den Bind-Mount mit dem
+    // Host geteilt. Der Container ist immer Linux, der Host oft macOS oder
+    // Windows -- und der Abhaengigkeitsbaum enthaelt plattformspezifische
+    // Binaries (@esbuild/*, @rolldown/binding-*, @tailwindcss/oxide-*,
+    // lightningcss-*). Ein Install vom Host schreibt die Host-Varianten, im
+    // Container fehlt dann jedes lauffaehige Binary und Vite startet nicht.
+    // Umgekehrt genauso. Der Host behaelt sein eigenes node_modules: das
+    // Volume ueberdeckt den Pfad nur INNERHALB des Containers.
+    //
+    // Die Vorlage sieht node_modules NEBEN .devcontainer/ vor. In diesem Repo
+    // liegt das Frontend aber in src/main/frontend, das Ziel ist deshalb
+    // dessen node_modules (zu ${containerWorkspaceFolder} siehe oben).
+    // postCreate.sh kennt denselben Pfad (NODE_DIR) -- beim Verschieben
+    // beide Stellen anpassen, ebenso pnpm_config_store_dir in containerEnv.
+    //
+    // Gibt es noch kein node_modules (frisch geklont, noch nie installiert),
+    // legt Docker an seiner Stelle ein leeres Verzeichnis als Mountpoint an,
+    // auf Linux-Hosts mit Eigentuemer root. Das ist in Ordnung: der Inhalt
+    // landet im Volume, und git ignoriert leere Verzeichnisse. Das Volume
+    // ist beim ersten Start leer -- einmal IM CONTAINER installieren
+    // ("yarn" in src/main/frontend; ein Maven-Build mit Frontend tut es per
+    // "yarn --cwd src/main/frontend" ebenfalls), danach bleibt es ueber
+    // Rebuilds erhalten. Auch wer vorher auf dem Host installiert hat, muss
+    // das: dessen node_modules ist im Container unsichtbar.
+    //
+    // Kein Node-Projekt? Die Zeile darf stehen bleiben, sie kostet nur das
+    // leere Verzeichnis. Oder entfernen, dann aber auch pnpm_config_store_dir
+    // in containerEnv, das sonst ins Leere zeigt.
+    //
+    // ACHTUNG: node_modules NICHT auf dem Host loeschen, solange der Container
+    // laeuft -- auch nicht indirekt per "pnpm install", "pnpm dev" oder
+    // "pnpm build" auf dem Host, deren Abhaengigkeits-Check einen Purge
+    // anbietet. Ein Mount haengt am Verzeichniseintrag, nicht am Namen: wird
+    // node_modules auf dem Host geloescht, verschwindet der Mount im
+    // laufenden Container lautlos, und der Container arbeitet auf dem
+    // Host-Verzeichnis weiter (so am 2026-07-21 in einem anderen Devcontainer
+    // nachgewiesen). Umbenennen ist harmlos, erst Loeschen ist toedlich.
+    // Abhilfe: Container neu bauen, das Volume bleibt dabei erhalten.
+    //
+    // Zuruecksetzen: docker volume rm claude-cropit-node-modules
+    // (bei gestopptem Container). Nicht "rm -rf node_modules" -- darin liegt
+    // auch der pnpm-Store.
+    "source=claude-cropit-node-modules,target=${containerWorkspaceFolder}/src/main/frontend/node_modules,type=volume"
+  ],
+
+  // Installiert Claude Code (nativ, ohne Node.js), Firewall-Werkzeuge, Hurl,
+  // delta, Headless-Chromium und die MCP-Server; richtet git, die Statuszeile
+  // und die persoenliche Datei ~/.claude/personal.sh ein (setup-home.sh).
+  "postCreateCommand": "bash .devcontainer/postCreate.sh",
+
+  // iptables-Regeln ueberleben keinen Container-Neustart, die Firewall muss
+  // deshalb bei JEDEM Start neu aufgebaut werden -- nicht nur bei postCreate.
+  // waitFor sorgt dafuer, dass die IDE wartet, bis die Firewall steht: sonst
+  // laeuft der Agent im Zeitfenster davor mit offenem Netz.
+  //
+  // Gestartet wird die root-eigene Kopie, die install-firewall.sh ablegt,
+  // nicht die Datei im Repo: sie ist das einzige, was "node" per sudo darf
+  // (siehe Ende von postCreate.sh), und das Repo ist fuer "node" schreibbar.
+  // Ohne Argumente aufrufen, die sudo-Regel erlaubt keine.
+  "postStartCommand": "sudo /usr/local/lib/devcontainer-firewall/init-firewall.sh",
+  "waitFor": "postStartCommand",
+
+  "remoteUser": "node",
+
+  // Default ist ohnehin true; hier explizit, weil das Setup davon ABHAENGT.
+  // CLI bzw. IDE setzen die uid/gid des remoteUser auf die des
+  // Host-Benutzers (wirksam auf Linux-Hosts; Docker Desktop auf macOS und
+  // Windows bildet die Rechte im Bind-Mount selbst ab). Dadurch gehoeren
+  // Dateien, die der Container im Projektordner anlegt, auf dem Host dem
+  // eigenen Benutzer -- und ein spaeterer Rebuild findet die eigenen Dateien
+  // in den Volumes wieder, falls sich die uid einmal aendert.
+  // .credentials.json hat Modus 600: stimmt die uid nicht, ist sie schlicht
+  // nicht lesbar und Claude Code verlangt eine neue Anmeldung. postCreate.sh
+  // prueft das und repariert es, weil die Volumes diesem Container allein
+  // gehoeren.
+  "updateRemoteUserUID": true,
+
+  // Nur fuer VS Code: installiert diese Extensions beim Oeffnen in den
+  // Container. Alle anderen Werkzeuge (devcontainer-CLI, JetBrains,
+  // "docker exec") ignorieren den Block, er schadet also nirgends.
+  //
+  // Laedt VS Code die Extensions erst beim Verbinden, steht die Firewall
+  // schon; siehe den Hinweis zu gallerycdn.vsassets.io in allowed-domains.txt.
+  // Abhilfe ohne Loch in der Firewall, in den Benutzereinstellungen von VS Code
+  // AUF DEM HOST: "remote.downloadExtensionsLocally": true. Dann laedt VS Code
+  // die Extensions auf dem Host und spielt sie in den Container.
   "customizations": {
     "vscode": {
-      "settings": {
-        "terminal.integrated.defaultProfile.linux": "bash"
-      },
       "extensions": [
-        // Java
-        "vscjava.vscode-java-pack",
-        "vmware.vscode-spring-boot",
         // Vue
+        "Vue.volar",
+        // Linting & Formatting
+        "bradlc.vscode-tailwindcss",
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
+        "editorconfig.editorconfig",
+        "lokalise.i18n-ally",
+        // Testing
         "vitest.explorer",
-        "Vue.volar",
-        // GitHub Copilot & Chat
-        "GitHub.copilot",
-        "GitHub.copilot-chat"
+        // Claude Code
+        "anthropic.claude-code"
       ]
     }
-  },
-
-  "forwardPorts": [8080, 9000],
-
-  "portsAttributes": {
-    "8080": {
-      "label": "Spring Boot Backend"
-    },
-    "9000": {
-      "label": "Quasar Dev Server"
-    }
-  },
-
-  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils ripgrep"
-
-  // Configure tool-specific properties.
-  // "customizations": {},
-
-  // Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-  // "remoteUser": "root"
+  }
 }

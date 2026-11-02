@@ -1,0 +1,5 @@
+# Vorsorglich: hier landet erfahrungsgemaess irgendwann eine .env mit
+# Zugangsdaten. Die Claude-Anmeldung braucht keine mehr (OAuth, siehe
+# devcontainer.json), gemeinsame Variablen stehen ausserhalb des Repos in
+# ~/.config/dev-containers.env.
+.env

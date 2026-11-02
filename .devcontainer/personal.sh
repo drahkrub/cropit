@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Vorlage fuer ~/.claude/personal.sh -- persoenliche Einstellungen, die nicht
+# ins Repo gehoeren.
+#
+#   cp .devcontainer/personal.sh.example ~/.claude/personal.sh
+#   vim ~/.claude/personal.sh
+#   bash .devcontainer/setup-home.sh
+#
+# setup-home.sh fuehrt die Datei bei jedem Rebuild aus, nach den
+# Voreinstellungen fuer alle -- was hier steht, gewinnt also. Sie liegt im
+# Home-Volume des Projekts und ueberlebt damit Rebuilds; weg ist sie erst mit
+# "docker volume rm claude-<projekt>-home".
+#
+# Alles hier muss mehrfach laufen koennen, ohne sich zu verdoppeln: lieber
+# "git config --global" und "cat >" als ">>".
+set -euo pipefail
+
+git config --global user.name  "Burkhard Graves"
+git config --global user.email "graves@id-on.de"
+
+# Geschmackssache rund um delta (der Pager selbst ist fuer alle gesetzt):
+# n/N springen im Pager von Datei zu Datei bzw. Hunk zu Hunk,
+git config --global delta.navigate true
+# Konflikte zeigen auch den gemeinsamen Vorfahren, ohne die Zeilen zu
+# wiederholen, die beide Seiten gleich haben (git >= 2.35),
+git config --global merge.conflictStyle zdiff3
+# verschobene Zeilen erscheinen in eigener Farbe statt als Loeschen + Einfuegen.
+git config --global diff.colorMoved default
+
+# ~/.bash_aliases liest die .bashrc des Basisimages ein, und zwar NACH ihren
+# eigenen HISTSIZE/HISTFILESIZE -- laut ihrem Kommentar der Ort fuer alle
+# eigenen Ergaenzungen, nicht nur fuer Aliase. Gilt nur in interaktiven
+# bash-Shells, ein "docker exec ... claude" ohne Shell sieht nichts davon.
+#
+# Verlauf ins Volume ~/.cache: ~/.bash_history laege im Container-Dateisystem
+# und waere nach jedem Rebuild weg. "history -a" schreibt jeden Befehl sofort
+# statt erst beim Beenden der Shell -- ein "docker stop" toetet per docker exec
+# gestartete Shells, ohne dass sie noch speichern koennen. Weg ist der Verlauf
+# erst mit dem Cache-Volume.
+#
+# --allow-dangerously-skip-permissions schaltet den Modus ohne Rueckfragen nur
+# FREI (umschalten mit Shift+Tab), aktiv ist er erst auf Wunsch. Dann grenzen
+# nur noch Container und Firewall ab; abschalten kann der Agent die Firewall
+# nicht, sudo darf "node" nur fuer ihren Start (siehe Ende von postCreate.sh).
+#
+# Diese Datei laeuft ohne sudo: postCreate.sh schraenkt es vorher ein.
+cat > ~/.bash_aliases <<'BASHRC'
+HISTFILE=~/.cache/bash_history
+HISTSIZE=10000
+HISTFILESIZE=20000
+PROMPT_COMMAND="history -a${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+
+alias claude='claude --allow-dangerously-skip-permissions'
+alias codex='codex --sandbox danger-full-access'
+BASHRC

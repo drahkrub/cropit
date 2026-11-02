@@ -1,0 +1,96 @@
+# Egress-Allowlist des Devcontainers.
+#
+# Gelesen von init-firewall.sh (Erstbefüllung) und refresh-allowlist.sh
+# (zyklische Auffrischung), und zwar aus deren root-eigener Kopie unter
+# /usr/local/lib/devcontainer-firewall/ -- nicht aus dem Repo, sonst könnte
+# sich jeder freischalten, der diese Datei editieren kann. Ein Hostname pro
+# Zeile, "#" leitet einen Kommentar ein, Leerzeilen werden ignoriert.
+#
+# Neue Domain eintragen: Zeile ergänzen, dann VOM HOST aus (im Container
+# darf "node" das nicht mehr, siehe postCreate.sh)
+#   docker exec -u root -w <ordner mit .devcontainer> claude-<projekt> \
+#     bash .devcontainer/install-firewall.sh
+# Ein Container-Neustart ist dafür nicht nötig.
+#
+# Die GitHub-Netze stehen NICHT hier: die kommen als CIDR-Liste aus
+# api.github.com/meta, nicht aus dem DNS (siehe init-firewall.sh).
+
+# --- Claude Code ----------------------------------------------------------
+# Anmeldung per OAuth (kein API-Schluessel, kein Bedrock). Alle drei Hosts
+# zeigen derzeit auf dieselbe Adresse, sind aber einzeln aufgefuehrt, damit
+# eine spaetere Trennung nicht stillschweigend ins Leere laeuft.
+claude.ai                 # nativer Installer + OAuth-Autorisierung
+console.anthropic.com     # Token-Austausch der OAuth-Anmeldung
+api.anthropic.com         # der eigentliche API-Verkehr
+downloads.claude.ai       # Binaries und Selbst-Update
+statsig.anthropic.com     # Feature-Flags; nicht öffentlich auflösbar, Fail-Soft
+statsig.com
+sentry.io
+
+# --- Codex (OpenAI) -------------------------------------------------------
+# Anmeldung per ChatGPT-Konto ("codex login --device-auth"). Das npm-Paket
+# kommt ueber registry.npmjs.org, das ist oben schon frei.
+auth.openai.com           # Anmeldung, Device-Code und Token-Austausch
+chatgpt.com               # API-Verkehr bei Anmeldung per ChatGPT-Konto (Cloudflare,
+                          # wechselnde IPs, refresh-allowlist.sh zieht nach)
+api.openai.com            # API-Verkehr bei Anmeldung per API-Schluessel
+
+# --- Java / Maven ---------------------------------------------------------
+repo.maven.apache.org
+repo1.maven.org
+api.sdkman.io             # JDK-/Maven-Updates via SDKMAN
+broker.sdkman.io          # Download-Weiterleitung von "sdk install" (Cloudflare,
+                          # geteilte IPs); die JDK-Pakete selbst liegen meist auf GitHub
+
+# --- Node / pnpm / yarn ---------------------------------------------------
+registry.npmjs.org        # auch der Bezugsweg für yarn via Corepack
+registry.yarnpkg.com      # Standard-Registry von yarn 1, steht in yarn.lock; zeigt
+                          # derzeit auf dieselben IPs wie registry.npmjs.org, das
+                          # ist aber kein Versprechen
+cdn.playwright.dev
+playwright.download.prss.microsoft.com
+
+# --- Nuxt UI (Komponentenbibliothek + MCP-Server) -------------------------
+ui.nuxt.com
+nuxt.com
+
+# --- VS Code (nur nötig, wenn der Container aus VS Code benutzt wird) -----
+marketplace.visualstudio.com
+main.vscode-cdn.net
+update.code.visualstudio.com
+#
+# Die Extensions selbst kommen damit NICHT durch. Der VS Code Server laedt sie
+# von einer Subdomain je Herausgeber, <publisher>.gallerycdn.vsassets.io
+# (Akamai), und das erst beim Verbinden -- also NACH der Firewall, auf die
+# "waitFor" ausdruecklich wartet. Am 2026-10-05 im Log gesehen: ETIMEDOUT auf
+# z. B. anthropic.gallerycdn.vsassets.io. Eine dig-basierte Allowlist kann
+# keine Wildcards; alle diese Namen landen aber auf demselben Akamai-Pool.
+#
+# Bewusst nicht dauerhaft freigegeben (das oeffnete den ganzen Pool, ueber den
+# auch fremde Akamai-Kunden erreichbar sind). Abhilfe ohne Freigabe: in den
+# Benutzereinstellungen von VS Code AUF DEM HOST
+#   "remote.downloadExtensionsLocally": true
+# setzen, dann laedt VS Code die Extensions auf dem Host und spielt sie in den
+# Container. Sonst die Adressen fuer eine Installation befristet ins ipset
+# legen, sie laufen nach 15 Minuten von selbst ab.
+# In einer Root-Shell vom Host aus (docker exec -it -u root claude-<projekt> bash):
+#   for ip in $(dig +short A anthropic.gallerycdn.vsassets.io | grep -E '^[0-9.]+$'); do
+#     ipset add allowed-domains "$ip" timeout 900 -exist; done
+# Danach die Installation in VS Code neu anstossen.
+
+# --- Ubuntu-Paketquellen --------------------------------------------------
+# Bewusst auskommentiert: alle apt-Installationen dieses Setups laufen in
+# postCreate.sh, also bevor die Firewall zum ersten Mal steht. Wer später im
+# laufenden Container "apt-get install ..." braucht (als root, vom Host per
+# docker exec -u root), kommentiert die drei Zeilen ein und ruft
+# install-firewall.sh auf (siehe oben). Symptom ohne sie: apt scheitert mit
+# "No route to host" (vor 2026-10-06: hing bis zum Timeout).
+# archive.ubuntu.com
+# security.ubuntu.com
+# azure.archive.ubuntu.com
+
+nodejs.org
+verdaccio.idon-dev.de
+yarnpkg.com
+archive.ubuntu.com
+
