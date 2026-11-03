@@ -50,8 +50,8 @@ User                     Quasar Frontend               Spring Boot Backend
 
 | Component | Choice | Reason |
 |-----------|--------|--------|
-| Language  | Java 17 | Available everywhere, robust stdlib |
-| Framework | Spring Boot 3.2 | Minimal setup for REST + file serving |
+| Language  | Java 25 | LTS JDK, robust stdlib |
+| Framework | Spring Boot 4.1.2 | Spring MVC REST API + file serving |
 | Build     | Maven | Standard Java build tool |
 
 ### Module Structure

@@ -29,8 +29,8 @@ see the independent [png-to-text project](png-to-text/README.md).
 
 | Tool              | Version  |
 |-------------------|----------|
-| Java              | 17+      |
-| Maven             | 3.6+     |
+| Java              | 25       |
+| Maven             | 3.6.3+   |
 | poppler-utils     | any      |
 | ImageMagick       | optional; required for the two-step method |
 
@@ -45,6 +45,11 @@ brew install poppler
 
 For the optional two-step method, also install ImageMagick (`sudo apt install
 imagemagick` on Debian/Ubuntu or `brew install imagemagick` on macOS).
+
+The backend uses Spring Boot **4.1.2** and compiles for Java **25**. With SDKMAN,
+run `sdk env install` and `sdk env` in `backend/` to use the versions pinned in
+`backend/.sdkmanrc` (Temurin 25.0.3 and Maven 3.10.0). The devcontainer already
+provides JDK 25.
 
 ### Frontend
 
