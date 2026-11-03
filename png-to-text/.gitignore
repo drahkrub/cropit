@@ -1,0 +1,9 @@
+input/
+output/
+
+output_4b/
+output_0_8b/
+output_0_8b_grounding/
+
+application-local.properties
+converter.properties
