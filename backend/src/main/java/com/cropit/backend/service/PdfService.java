@@ -1,6 +1,7 @@
 package com.cropit.backend.service;
 
 import com.cropit.backend.model.CropJob;
+import com.cropit.backend.model.ConversionMode;
 import com.cropit.backend.model.JobState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,7 +14,6 @@ import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.FileImageInputStream;
 import java.awt.image.BufferedImage;
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -31,13 +31,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * Executes pdftoppm and pdfinfo as external processes via {@link ProcessBuilder}.
  *
- * <p>Preview rendering always uses {@code -scale-to 1540} so the longer side of every
- * preview PNG is exactly 1540 px.
- *
- * <p>Crop rendering computes an <em>adjusted</em> {@code -scale-to} value so that after
- * pdftoppm applies the {@code -x/-y/-W/-H} crop window, the longer side of the resulting
- * PNG is still exactly {@value #TARGET_LONG_SIDE} px. See {@link #renderAllPages} for the
- * detailed calculation.
+ * <p>By default, pdftoppm renders directly to the target pixel size. Jobs may
+ * instead rasterise at the configured DPI (default 400), then resize in place
+ * with mogrify. The selection applies to both previews and cropped output.
  *
  * <p>Both preview generation and final rendering use a shared fixed-size pool of
  * {@code pdftoppm} worker processes.  Preview pages are processed in batches of
@@ -57,10 +53,24 @@ public class PdfService {
     private static final int BATCH_SIZE = 10;
 
     /**
-     * Required length (in pixels) of the longer side of every output PNG.
+     * Maximum length (in pixels) of the longer side of every output PNG.
      * Preview PNGs and cropped output PNGs both target this size.
      */
-    static final int TARGET_LONG_SIDE = 1540;
+    private final int targetLongSide;
+
+    private final int renderDpi;
+
+    public PdfService(@Value("${cropit.render.target-long-side:2048}") int targetLongSide,
+                      @Value("${cropit.render.dpi:400}") int renderDpi) {
+        if (targetLongSide <= 0) {
+            throw new IllegalArgumentException("cropit.render.target-long-side must be a positive pixel count");
+        }
+        if (renderDpi <= 0) {
+            throw new IllegalArgumentException("cropit.render.dpi must be positive");
+        }
+        this.targetLongSide = targetLongSide;
+        this.renderDpi = renderDpi;
+    }
 
     /**
      * Number of concurrent {@code pdftoppm} worker processes shared between preview
@@ -129,6 +139,7 @@ public class PdfService {
         Path pdfPath = job.getPdfPath();
         Path previewDir = job.getJobDir().resolve("preview");
         int count = job.getPreviewCount();
+        boolean twoStep = job.getConversionMode() == ConversionMode.PDFTOPPM_MOGRIFY;
 
         // Pass -l batchEnd directly; pdftoppm stops at the actual last page even when
         // batchEnd exceeds the page count, so no upfront pdfinfo call is needed.
@@ -143,17 +154,24 @@ public class PdfService {
             final int batchEnd = Math.min(start + PREVIEW_BATCH_SIZE - 1, count);
 
             futures.add(workerPool.submit((Callable<Void>) () -> {
-                List<String> cmd = new ArrayList<>(List.of(
-                        "pdftoppm",
-                        "-png",
-                        "-r", "200",
-                        "-scale-to", String.valueOf(TARGET_LONG_SIDE),
+                List<String> cmd = new ArrayList<>(List.of("pdftoppm", "-png"));
+                cmd.addAll(twoStep
+                        ? List.of("-r", String.valueOf(renderDpi))
+                        : List.of("-scale-to", String.valueOf(targetLongSide)));
+                cmd.addAll(List.of(
                         "-f", String.valueOf(batchStart),
                         "-l", String.valueOf(batchEnd),
                         pdfPath.toString(),
                         outputPrefix
                 ));
                 runProcess(cmd, "pdftoppm preview batch " + batchStart + "-" + batchEnd);
+                List<Path> batchFiles = listBatchPngs(previewDir, batchStart, batchEnd);
+                if (batchStart == 1 && !batchFiles.isEmpty()) {
+                    int[] rawDimensions = readPngDimensions(batchFiles.get(0));
+                    job.setRasterImageWidth(rawDimensions[0]);
+                    job.setRasterImageHeight(rawDimensions[1]);
+                }
+                if (twoStep) resizePngs(batchFiles);
                 return null;
             }));
         }
@@ -246,7 +264,7 @@ public class PdfService {
         int imgW = job.getPreviewImageWidth();
         int imgH = job.getPreviewImageHeight();
 
-        // Convert normalised coordinates to pixel values in the preview (1540-scale) space.
+        // Convert normalised coordinates to pixel values in the preview pixel space.
         int cropX = (int) Math.round(normX * imgW);
         int cropY = (int) Math.round(normY * imgH);
         int cropW = (int) Math.round(normW * imgW);
@@ -258,21 +276,17 @@ public class PdfService {
         cropW = Math.max(1, Math.min(cropW, imgW - cropX));
         cropH = Math.max(1, Math.min(cropH, imgH - cropY));
 
-        // Compute an adjusted -scale-to value so the longer side of the *cropped*
-        // output PNG equals exactly TARGET_LONG_SIDE pixels. See computeScaledCropParams
-        // for the full derivation.
-        int[] scaled = computeScaledCropParams(cropX, cropY, cropW, cropH);
-        int scaleTo    = scaled[0];
-        int cropXScaled = scaled[1];
-        int cropYScaled = scaled[2];
-        int cropWScaled = scaled[3];
-        int cropHScaled = scaled[4];
-
-        log.info("Render job={} total={} previewBox=[{},{},{},{}] scaleTo={} scaledBox=[{},{},{},{}]",
-                job.getJobId(), total,
-                cropX, cropY, cropW, cropH,
-                scaleTo,
-                cropXScaled, cropYScaled, cropWScaled, cropHScaled);
+        boolean twoStep = job.getConversionMode() == ConversionMode.PDFTOPPM_MOGRIFY;
+        int[] directParams = twoStep ? null
+                : computeScaledCropParams(cropX, cropY, cropW, cropH, targetLongSide);
+        int[] scaled = twoStep
+                ? computeRasterCropParams(cropX, cropY, cropW, cropH,
+                        imgW, imgH, job.getRasterImageWidth(), job.getRasterImageHeight())
+                : new int[]{directParams[1], directParams[2], directParams[3], directParams[4]};
+        int cropXScaled = scaled[0];
+        int cropYScaled = scaled[1];
+        int cropWScaled = scaled[2];
+        int cropHScaled = scaled[3];
 
         Path outputDir = job.getJobDir().resolve("output");
         Path pdfPath = job.getPdfPath();
@@ -287,11 +301,11 @@ public class PdfService {
             final String outputPrefix = outputDir.resolve("page").toString();
 
             futures.add(workerPool.submit((Callable<Void>) () -> {
-                List<String> cmd = new ArrayList<>(List.of(
-                        "pdftoppm",
-                        "-png",
-                        "-r", "200",
-                        "-scale-to", String.valueOf(scaleTo),
+                List<String> cmd = new ArrayList<>(List.of("pdftoppm", "-png"));
+                cmd.addAll(twoStep
+                        ? List.of("-r", String.valueOf(renderDpi))
+                        : List.of("-scale-to", String.valueOf(directParams[0])));
+                cmd.addAll(List.of(
                         "-x", String.valueOf(cropXScaled),
                         "-y", String.valueOf(cropYScaled),
                         "-W", String.valueOf(cropWScaled),
@@ -303,6 +317,7 @@ public class PdfService {
                 ));
 
                 runProcess(cmd, "pdftoppm render batch " + batchStart + "-" + batchEnd);
+                if (twoStep) resizePngs(listBatchPngs(outputDir, batchStart, batchEnd));
 
                 // Update progress atomically: each worker increments by the number of
                 // pages it just completed.
@@ -346,53 +361,55 @@ public class PdfService {
     }
 
     /**
-     * Computes the adjusted pdftoppm {@code -scale-to} value and the scaled crop
-     * parameters such that the longer side of the cropped output PNG equals exactly
-     * {@link #TARGET_LONG_SIDE} pixels.
-     *
-     * <p>When pdftoppm is invoked with {@code -scale-to S -x x -y y -W w -H h} it
-     * renders the full page at scale {@code S} (longer side = S) and then crops the
-     * window {@code [x, y, w, h]} out of that rendering. The resulting PNG has
-     * dimensions {@code w × h}. To guarantee {@code max(w, h) = TARGET_LONG_SIDE} we
-     * must choose S so that the crop window—after scaling from the preview space to
-     * the new rendering space—produces the target size.
-     *
-     * <p><b>Algorithm</b>
-     * <ol>
-     *   <li>Let {@code L = max(cropW, cropH)} (longer side of the crop in preview
-     *       pixel space where the full page's longer side = TARGET_LONG_SIDE).</li>
-     *   <li>Set {@code scaleTo = round(TARGET_LONG_SIDE² / L)}. This produces an
-     *       integer S such that {@code round(L × S / TARGET_LONG_SIDE) ≈
-     *       TARGET_LONG_SIDE} (within ±1 before the corrective step below).</li>
-     *   <li>Scale all four crop parameters by {@code scaleTo / TARGET_LONG_SIDE}.</li>
-     *   <li>Force the longer scaled crop dimension to exactly TARGET_LONG_SIDE.
-     *       Due to integer rounding the value is at most ±1 off, so this adjustment
-     *       is within the ≤1 px tolerance explicitly allowed by the specification.</li>
-     * </ol>
-     *
-     * @param cropX  crop origin X in preview pixel space
-     * @param cropY  crop origin Y in preview pixel space
-     * @param cropW  crop width in preview pixel space
-     * @param cropH  crop height in preview pixel space
-     * @return int array {@code [scaleTo, scaledX, scaledY, scaledW, scaledH]}
+     * Direct rendering scales the full page so the cropped PNG's longer side
+     * reaches the target, including a correction for integer rounding.
+     * Returns [scaleTo, x, y, width, height].
      */
-    static int[] computeScaledCropParams(int cropX, int cropY, int cropW, int cropH) {
-        int longerCrop = Math.max(cropW, cropH);
-        int scaleTo = (int) Math.round((double) TARGET_LONG_SIDE * TARGET_LONG_SIDE / longerCrop);
+    static int[] computeScaledCropParams(int x, int y, int w, int h, int target) {
+        int scaleTo = (int) Math.round((double) target * target / Math.max(w, h));
+        int scaledX = (int) Math.round((double) x * scaleTo / target);
+        int scaledY = (int) Math.round((double) y * scaleTo / target);
+        int scaledW = (int) Math.round((double) w * scaleTo / target);
+        int scaledH = (int) Math.round((double) h * scaleTo / target);
+        if (h >= w) scaledH = target;
+        else scaledW = target;
+        return new int[]{scaleTo, scaledX, scaledY, Math.max(1, scaledW), Math.max(1, scaledH)};
+    }
 
-        int scaledX = (int) Math.round((double) cropX * scaleTo / TARGET_LONG_SIDE);
-        int scaledY = (int) Math.round((double) cropY * scaleTo / TARGET_LONG_SIDE);
-        int scaledW = (int) Math.round((double) cropW * scaleTo / TARGET_LONG_SIDE);
-        int scaledH = (int) Math.round((double) cropH * scaleTo / TARGET_LONG_SIDE);
+    /**
+     * Maps preview crop edges to the raster at renderDpi, including rounding at
+     * page boundaries. No forced output size: mogrify only shrinks large images.
+     */
+    static int[] computeRasterCropParams(int x, int y, int w, int h,
+                                        int previewW, int previewH, int rasterW, int rasterH) {
+        int left = Math.max(0, Math.min(rasterW - 1,
+                (int) Math.round((double) x * rasterW / previewW)));
+        int top = Math.max(0, Math.min(rasterH - 1,
+                (int) Math.round((double) y * rasterH / previewH)));
+        int right = Math.min(rasterW, (int) Math.round((double) (x + w) * rasterW / previewW));
+        int bottom = Math.min(rasterH, (int) Math.round((double) (y + h) * rasterH / previewH));
+        return new int[]{left, top, Math.max(1, right - left), Math.max(1, bottom - top)};
+    }
 
-        // Force the longer side to exactly TARGET_LONG_SIDE (≤ 1 px tolerance).
-        if (cropH >= cropW) {
-            scaledH = TARGET_LONG_SIDE;
-        } else {
-            scaledW = TARGET_LONG_SIDE;
-        }
+    /**
+     * Expand page-*.png ourselves and restrict to this worker's page range:
+     * a wildcard spanning parallel batches could resize partially written files.
+     */
+    private List<Path> listBatchPngs(Path directory, int first, int last) throws IOException {
+        return listPngsInDir(directory).stream().filter(path -> {
+            String name = path.getFileName().toString();
+            if (!name.matches("page-[0-9]+\\.png")) return false;
+            int page = Integer.parseInt(name.substring(5, name.length() - 4));
+            return page >= first && page <= last;
+        }).toList();
+    }
 
-        return new int[]{scaleTo, scaledX, scaledY, scaledW, scaledH};
+    private void resizePngs(List<Path> files) throws IOException, InterruptedException {
+        if (files.isEmpty()) return;
+        List<String> cmd = new ArrayList<>(List.of("mogrify", "-resize",
+                targetLongSide + "x" + targetLongSide + ">"));
+        files.forEach(path -> cmd.add(path.toString()));
+        runProcess(cmd, "mogrify resize");
     }
 
     /**

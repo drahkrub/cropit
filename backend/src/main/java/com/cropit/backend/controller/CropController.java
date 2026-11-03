@@ -1,6 +1,7 @@
 package com.cropit.backend.controller;
 
 import com.cropit.backend.model.CropBoxRequest;
+import com.cropit.backend.model.ConversionMode;
 import com.cropit.backend.model.CropJob;
 import com.cropit.backend.model.JobState;
 import com.cropit.backend.service.JobService;
@@ -59,6 +60,7 @@ public class CropController {
      * <ul>
      *   <li>{@code file}         – the PDF file</li>
      *   <li>{@code previewCount} – number of previews to generate (1–20, default 16)</li>
+     *   <li>{@code conversionMode} – PDFTOPPM (default) or PDFTOPPM_MOGRIFY</li>
      * </ul>
      *
      * <p>Response:
@@ -69,14 +71,15 @@ public class CropController {
      *     { "filename": "page-001.png", "url": "/api/jobs/{jobId}/files/page-001.png" }
      *   ],
      *   "imageWidth": 1088,
-     *   "imageHeight": 1540
+     *   "imageHeight": 2048
      * }
      * </pre>
      */
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Map<String, Object>> upload(
             @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "previewCount", defaultValue = "16") int previewCount) {
+            @RequestParam(value = "previewCount", defaultValue = "16") int previewCount,
+            @RequestParam(value = "conversionMode", defaultValue = "PDFTOPPM") ConversionMode conversionMode) {
 
         // Validate inputs
         if (file.isEmpty()) {
@@ -104,6 +107,7 @@ public class CropController {
             file.transferTo(pdfPath);
             job.setPdfPath(pdfPath);
             job.setPreviewCount(previewCount);
+            job.setConversionMode(conversionMode);
 
             // Generate preview PNGs (synchronous – preview generation is fast)
             List<String> previewFiles = pdfService.generatePreviews(job);
@@ -122,13 +126,16 @@ public class CropController {
             response.put("imageWidth", job.getPreviewImageWidth());
             response.put("imageHeight", job.getPreviewImageHeight());
             response.put("totalPages", job.getTotalPages());
+            response.put("conversionMode", job.getConversionMode());
 
             return ResponseEntity.ok(response);
 
         } catch (IOException | InterruptedException e) {
             log.error("Preview generation failed for job {}", job.getJobId(), e);
             String msg = e.getMessage();
-            if (msg != null && (msg.contains("pdftoppm") || msg.contains("No such file"))) {
+            if (msg != null && msg.contains("Cannot run program \"mogrify\"")) {
+                msg = "mogrify is not installed or not on PATH. Please install ImageMagick or select pdftoppm only.";
+            } else if (msg != null && msg.contains("Cannot run program \"pdftoppm\"")) {
                 msg = "pdftoppm is not installed or not on PATH. Please install poppler-utils.";
             }
             jobService.failJob(job, msg);
@@ -169,6 +176,7 @@ public class CropController {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("jobId", jobId);
         response.put("state", job.getState().name());
+        response.put("conversionMode", job.getConversionMode());
         response.put("donePages", job.getDonePages().get());
         response.put("totalPages", job.getTotalPages());
         response.put("outputFiles", outputUrls);

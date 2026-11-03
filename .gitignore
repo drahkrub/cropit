@@ -1,0 +1,10 @@
+# Local conversion samples and comparison output
+/artifacts/
+/cci_zeitung_10_2026.pdf
+
+# Generated build output and dependency caches
+target/
+node_modules/
+
+# Local IDE preferences
+**/nbproject/private/

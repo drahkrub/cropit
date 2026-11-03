@@ -24,12 +24,18 @@ public class CropJob {
     /** Number of preview images requested (1–20). */
     private int previewCount;
 
+    private ConversionMode conversionMode = ConversionMode.PDFTOPPM;
+
     /** Total pages in the PDF. Set during preview generation (from file count or pdfinfo). */
     private volatile int totalPages;
 
     /** Pixel dimensions of the first preview image (set after preview generation). */
     private volatile int previewImageWidth;
     private volatile int previewImageHeight;
+
+    /** Dimensions before preview resizing, at the configured rendering DPI. */
+    private volatile int rasterImageWidth;
+    private volatile int rasterImageHeight;
 
     /** Progress counters updated by the render thread. */
     private final AtomicInteger donePages = new AtomicInteger(0);
@@ -61,6 +67,9 @@ public class CropJob {
     public int getPreviewCount() { return previewCount; }
     public void setPreviewCount(int previewCount) { this.previewCount = previewCount; }
 
+    public ConversionMode getConversionMode() { return conversionMode; }
+    public void setConversionMode(ConversionMode conversionMode) { this.conversionMode = conversionMode; }
+
     public int getTotalPages() { return totalPages; }
     public void setTotalPages(int totalPages) { this.totalPages = totalPages; }
 
@@ -69,6 +78,11 @@ public class CropJob {
 
     public int getPreviewImageHeight() { return previewImageHeight; }
     public void setPreviewImageHeight(int previewImageHeight) { this.previewImageHeight = previewImageHeight; }
+
+    public int getRasterImageWidth() { return rasterImageWidth; }
+    public void setRasterImageWidth(int width) { rasterImageWidth = width; }
+    public int getRasterImageHeight() { return rasterImageHeight; }
+    public void setRasterImageHeight(int height) { rasterImageHeight = height; }
 
     public AtomicInteger getDonePages() { return donePages; }
 

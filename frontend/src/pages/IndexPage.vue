@@ -46,6 +46,19 @@
           />
         </div>
 
+        <q-select
+          v-model="conversionMode"
+          :options="conversionModeOptions"
+          emit-value
+          map-options
+          outlined
+          dense
+          label="Conversion method"
+          hint="Used for previews and output. Upload again after changing the method."
+          :disable="uploading || rendering"
+          class="q-mt-md"
+        />
+
         <div v-if="uploadError" class="text-negative q-mt-sm">
           {{ uploadError }}
         </div>
@@ -147,6 +160,9 @@
       <q-card flat bordered class="q-mb-md">
         <q-card-section>
           <div class="text-subtitle1 q-mb-sm">Step 3 – Render All Pages</div>
+          <div class="text-caption text-grey-7 q-mb-sm">
+            Conversion method: {{ jobConversionModeLabel }}
+          </div>
 
           <q-btn
             color="secondary"
@@ -221,6 +237,12 @@ import CropPreview from 'components/CropPreview.vue';
 // ---------------------------------------------------------------------------
 const selectedFile = ref<File | null>(null);
 const previewCount = ref<number>(16);
+type ConversionMode = 'PDFTOPPM' | 'PDFTOPPM_MOGRIFY';
+const conversionMode = ref<ConversionMode>('PDFTOPPM');
+const conversionModeOptions = [
+  { label: '1 – pdftoppm only (direct)', value: 'PDFTOPPM' },
+  { label: '2 – pdftoppm + mogrify (two steps)', value: 'PDFTOPPM_MOGRIFY' },
+];
 const uploading = ref(false);
 const uploadError = ref<string | null>(null);
 
@@ -228,6 +250,10 @@ const uploadError = ref<string | null>(null);
 // Job state
 // ---------------------------------------------------------------------------
 const jobId = ref<string | null>(null);
+const jobConversionMode = ref<ConversionMode | null>(null);
+const jobConversionModeLabel = computed(() =>
+  conversionModeOptions.find(option => option.value === jobConversionMode.value)?.label ?? '',
+);
 
 // ---------------------------------------------------------------------------
 // Preview URLs and page mapping
@@ -308,6 +334,7 @@ async function uploadPdf() {
   imageSizes.value = [];
   cropBox.value = null;
   jobId.value = null;
+  jobConversionMode.value = null;
   jobState.value = '';
   donePages.value = 0;
   totalPages.value = 0;
@@ -318,6 +345,7 @@ async function uploadPdf() {
   const formData = new FormData();
   formData.append('file', selectedFile.value);
   formData.append('previewCount', String(previewCount.value));
+  formData.append('conversionMode', conversionMode.value);
 
   try {
     const res = await fetch('/api/upload', {
@@ -331,6 +359,7 @@ async function uploadPdf() {
       imageWidth?: number;
       imageHeight?: number;
       totalPages?: number;
+      conversionMode?: ConversionMode;
       error?: string;
     };
 
@@ -340,6 +369,7 @@ async function uploadPdf() {
     }
 
     jobId.value = data.jobId ?? null;
+    jobConversionMode.value = data.conversionMode ?? conversionMode.value;
     totalPages.value = data.totalPages ?? 0;
     imageSizes.value = [];
 

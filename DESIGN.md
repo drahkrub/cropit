@@ -102,19 +102,42 @@ total page count. This value is used to:
 1. Determine how many preview pages to generate (`min(previewCount, totalPages)`).
 2. Drive the batch-render loop and progress calculation.
 
-### pdftoppm – Preview Generation
+### Conversion Method Selection
+
+The upload form and multipart endpoint accept `conversionMode`:
+
+- `PDFTOPPM` (default): render directly to the configured pixel target with
+  `-scale-to`, using the crop scaling described below. No `-r` or `mogrify`.
+- `PDFTOPPM_MOGRIFY`: render with `-r <dpi>` (default 400), without `-scale-to`,
+  then resize the resulting PNGs in place with `mogrify`.
+
+`CropJob` stores the selection, so previews and final rendering always use the
+same method. The upload response and job status expose `conversionMode`.
+Changing the selection in the form applies to the next upload.
+
+In two-step mode, previews record the first page's raster dimensions before
+resizing. Crop edges are mapped from preview coordinates back to these raster
+dimensions. Each worker calls `mogrify -resize '<target>x<target>>'` immediately
+after its `pdftoppm` batch completes and passes only the files in its own page
+range. It never matches files still being written by other workers. Progress
+advances after resizing succeeds. Smaller images are not enlarged.
+
+The DPI is configured with `cropit.render.dpi` / `CROPIT_RENDER_DPI` (default
+400); it is only used in two-step mode. ImageMagick is optional for direct mode.
+
+### pdftoppm – Preview Generation (Default Direct Mode)
 
 Preview pages are generated using the shared worker pool in batches of 4 pages,
 mirroring the approach used for final rendering. Each batch is submitted as a
 separate `pdftoppm` invocation:
 
 ```
-pdftoppm -png -r 200 -scale-to 1540 -f <batchStart> -l <batchEnd> input.pdf <jobDir>/preview/page
+pdftoppm -png -scale-to <targetLongSide> -f <batchStart> -l <batchEnd> input.pdf <jobDir>/preview/page
 ```
 
 - `-png` – output format
-- `-r 200` – render at 200 DPI
-- `-scale-to 1540` – scale so the larger dimension is exactly 1540 px
+- `-scale-to <targetLongSide>` – longer side in pixels; configured by
+  `cropit.render.target-long-side` / `CROPIT_TARGET_LONG_SIDE` (default 2048)
 - `-f <batchStart> -l <batchEnd>` – page range for this batch
 
 For example, a 16-page preview request with batch size 4 results in four
@@ -130,8 +153,11 @@ These dimensions are needed later for the crop-coordinate conversion.
 
 ### pdftoppm – Crop Render with Exact Output Sizing
 
+The following applies to default direct mode. Two-step mode instead maps the
+crop to the original DPI raster and resizes afterward.
+
 ```
-pdftoppm -png -r 200 -scale-to <S_adj> \
+pdftoppm -png -scale-to <S_adj> \
          -x <cropX_s> -y <cropY_s> -W <cropW_s> -H <cropH_s> \
          -f <start> -l <end> \
          input.pdf <jobDir>/output/page
@@ -143,48 +169,48 @@ When `pdftoppm` is called with `-scale-to S` **and** `-x/-y/-W/-H`, it renders
 the full page so its longer side equals `S` pixels, then crops the requested
 window out of that rendering. The resulting PNG has dimensions exactly `W × H`.
 
-If `S = TARGET_LONG_SIDE = 1540` and the crop window is smaller than the full
-page, the output PNG's longer side is smaller than 1540 — violating the
+If `S = targetLongSide` and the crop window is smaller than the full
+page, the output PNG's longer side is smaller than the configured target — violating the
 downstream LLM requirement.
 
 #### Corrective formula
 
-Let `L = max(cropW, cropH)` (longer crop side in the 1540-px preview space).
+Let `L = max(cropW, cropH)` (longer crop side in the preview space whose longer side is `targetLongSide` pixels).
 
 ```
-S_adj = round(TARGET_LONG_SIDE² / L)
+S_adj = round(targetLongSide² / L)
 ```
 
 All four crop parameters are then scaled to the new rendering space:
 
 ```
-cropX_s = round(cropX × S_adj / TARGET_LONG_SIDE)
-cropY_s = round(cropY × S_adj / TARGET_LONG_SIDE)
-cropW_s = round(cropW × S_adj / TARGET_LONG_SIDE)
-cropH_s = round(cropH × S_adj / TARGET_LONG_SIDE)
+cropX_s = round(cropX × S_adj / targetLongSide)
+cropY_s = round(cropY × S_adj / targetLongSide)
+cropW_s = round(cropW × S_adj / targetLongSide)
+cropH_s = round(cropH × S_adj / targetLongSide)
 ```
 
-Due to integer rounding the longer scaled dimension may be `TARGET_LONG_SIDE ± 1`.
+Due to integer rounding the longer scaled dimension may be `targetLongSide ± 1`.
 The specification explicitly permits correcting crop parameters by up to 1 px, so
-the longer dimension is forced to exactly `TARGET_LONG_SIDE` after scaling:
+the longer dimension is forced to exactly `targetLongSide` after scaling:
 
 ```java
-if (cropH >= cropW) cropH_s = TARGET_LONG_SIDE;
-else                cropW_s = TARGET_LONG_SIDE;
+if (cropH >= cropW) cropH_s = targetLongSide;
+else                cropW_s = targetLongSide;
 ```
 
-**Result:** The cropped output PNG always has its longer side = 1540 px, with no
+**Result:** The cropped output PNG always has its longer side = `targetLongSide` px (default 2048), with no
 post-process upscaling.  The shorter side scales proportionally, preserving the
 original crop aspect ratio to within 1 px.
 
-#### Verification example (user's bug report)
+#### Verification example (legacy target of 1540 pixels)
 
 | Parameter | Before fix | After fix |
 |-----------|-----------|-----------|
-| `-scale-to` | `1540` | `1678` |
-| `-W` | `970` | `1057` |
+| `-scale-to` | `1540` | `1677` |
+| `-W` | `970` | `1056` |
 | `-H` | `1414` | `1540` |
-| Output size | `970 × 1414` | `1057 × 1540` ✓ |
+| Output size | `970 × 1414` | `1056 × 1540` ✓ |
 
 ---
 
@@ -277,14 +303,19 @@ cropH_px = round(cropBox.h * previewImageHeight)
 ```
 
 where `previewImageWidth` and `previewImageHeight` are the pixel dimensions of the
-first generated preview PNG (stored in `CropJob` after preview generation, always
-with its longer side = 1540 px).
+first generated preview PNG (stored in `CropJob` after preview generation). Direct
+mode renders its longer side at `targetLongSide` px (default 2048); two-step mode
+uses that value as an upper limit and does not enlarge smaller images.
 
-These values are then passed to `computeScaledCropParams()` which derives the
+In direct mode, these values are passed to `computeScaledCropParams()` which derives the
 adjusted `-scale-to` value and re-scales the crop parameters so that the longer
-side of the final cropped output PNG equals exactly 1540 px. See the
+side of the final cropped output PNG equals exactly `targetLongSide` px (default 2048). See the
 [pdftoppm crop rendering section](#pdftoppm--crop-render-with-exact-output-sizing)
 above for the full derivation.
+
+In two-step mode, `computeRasterCropParams()` maps the crop edges to the first
+page's original raster dimensions at the configured DPI. The cropped raster is
+then resized to fit the configured maximum side length by `mogrify`.
 
 > **Assumption:** All pages in the PDF have the same dimensions. If they differ,
 > the crop region in normalised coordinates will be applied relative to the first
