@@ -1,15 +1,5 @@
 package com.cropit.pngtext;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -19,6 +9,16 @@ import org.springframework.ai.content.Media;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MimeTypeUtils;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
 
 @Service
 public class BatchConverter {
@@ -46,9 +46,9 @@ public class BatchConverter {
         String prompt = properties.promptFile() == null || properties.promptFile().isBlank()
                 ? properties.prompt()
                 : Files.readString(Path.of(properties.promptFile()), StandardCharsets.UTF_8);
-        if (prompt.isBlank()) {
-            throw new IOException("Prompt must not be empty");
-        }
+//        if (prompt.isBlank()) {
+//            throw new IOException("Prompt must not be empty");
+//        }
         List<Path> images;
         try (var entries = Files.list(input)) {
             images = entries.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
@@ -78,7 +78,7 @@ public class BatchConverter {
             }
             try {
                 log.info("Processing {}/{}: {}", written + skipped + failed + 1, images.size(), image.getFileName());
-                var message = UserMessage.builder().text(prompt)
+                var message = (prompt.isBlank() ? UserMessage.builder() : UserMessage.builder().text(prompt))
                         .media(new Media(MimeTypeUtils.IMAGE_PNG, new FileSystemResource(image))).build();
                 var response = model.call(new Prompt(message));
                 String text = response == null || response.getResult() == null

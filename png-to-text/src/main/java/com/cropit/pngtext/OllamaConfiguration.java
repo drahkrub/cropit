@@ -29,6 +29,7 @@ class OllamaConfiguration {
                         .model(properties.model())
                         .disableThinking()
                         .temperature(0.0)
+//                        .topP(0.9)
                         .numCtx(properties.contextSize())
                         .numPredict(properties.maxTokens())
                         .build())
